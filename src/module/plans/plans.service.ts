@@ -28,5 +28,7 @@ export class PlansService {
     return this.planModel.findByIdAndUpdate(id, dto, { new: true }).lean();
   }
 
-  // delete is optional for now — many SaaS apps never delete plans
+  findByName(name: string) {
+    return this.planModel.findOne({ name }).lean();
+  }
 }
