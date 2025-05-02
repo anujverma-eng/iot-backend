@@ -1,0 +1,617 @@
+Directory Tree:
+iot-backend/
+│   ├── nest-cli.json
+│   ├── README.md
+│   ├── .gitignore
+│   ├── tsconfig.build.json
+│   ├── .env
+│   ├── .prettierrc
+│   ├── tsconfig.json
+│   ├── .env.example
+│   ├── eslint.config.mjs
+│   ├── test/
+│   │   ├── app.e2e-spec.ts
+│   │   ├── jest-e2e.json
+│   ├── dist/ [EXCLUDED]
+│   ├── node_modules/ [EXCLUDED]
+│   ├── .git/ [EXCLUDED]
+│   ├── src/
+│   │   ├── main.ts
+│   │   ├── app.service.ts
+│   │   ├── app.module.ts
+│   │   ├── app.controller.spec.ts
+│   │   ├── app.controller.ts
+│   │   ├── database/
+│   │   │   ├── database.module.ts
+│   │   ├── interceptors/
+│   │   │   ├── logging.interceptor.ts
+│   │   ├── migrations/
+│   │   ├── tasks/
+│   │   ├── module/
+│   │   │   ├── health/
+│   │   │   │   ├── health.module.ts
+│   │   │   │   ├── health.controller.ts
+│   │   ├── common/
+│   │   │   ├── logger/
+│   │   │   │   ├── logger.service.ts
+│   │   │   │   ├── logger.module.ts
+│   │   │   │   ├── winston.config.ts
+│   │   │   ├── config/
+│   │   │   │   ├── config.module.ts
+│   │   │   │   ├── appConfig.ts
+│   │   │   │   ├── env.validation.ts
+│   │   │   ├── decorators/
+│   │   │   ├── constants/
+│   │   │   ├── utils/
+│   │   │   ├── exception-filters/
+│   │   │   ├── guards/
+
+
+
+
+# ======================
+# File: nest-cli.json
+# ======================
+
+{
+  "$schema": "https://json.schemastore.org/nest-cli",
+  "collection": "@nestjs/schematics",
+  "sourceRoot": "src",
+  "compilerOptions": {
+    "deleteOutDir": true
+  }
+}
+
+
+# ======================
+# File: README.md
+# ======================
+
+<p align="center">
+  <a href="http://nestjs.com/" target="blank"><img src="https://nestjs.com/img/logo-small.svg" width="120" alt="Nest Logo" /></a>
+</p>
+
+[circleci-image]: https://img.shields.io/circleci/build/github/nestjs/nest/master?token=abc123def456
+[circleci-url]: https://circleci.com/gh/nestjs/nest
+
+  <p align="center">A progressive <a href="http://nodejs.org" target="_blank">Node.js</a> framework for building efficient and scalable server-side applications.</p>
+    <p align="center">
+<a href="https://www.npmjs.com/~nestjscore" target="_blank"><img src="https://img.shields.io/npm/v/@nestjs/core.svg" alt="NPM Version" /></a>
+<a href="https://www.npmjs.com/~nestjscore" target="_blank"><img src="https://img.shields.io/npm/l/@nestjs/core.svg" alt="Package License" /></a>
+<a href="https://www.npmjs.com/~nestjscore" target="_blank"><img src="https://img.shields.io/npm/dm/@nestjs/common.svg" alt="NPM Downloads" /></a>
+<a href="https://circleci.com/gh/nestjs/nest" target="_blank"><img src="https://img.shields.io/circleci/build/github/nestjs/nest/master" alt="CircleCI" /></a>
+<a href="https://discord.gg/G7Qnnhy" target="_blank"><img src="https://img.shields.io/badge/discord-online-brightgreen.svg" alt="Discord"/></a>
+<a href="https://opencollective.com/nest#backer" target="_blank"><img src="https://opencollective.com/nest/backers/badge.svg" alt="Backers on Open Collective" /></a>
+<a href="https://opencollective.com/nest#sponsor" target="_blank"><img src="https://opencollective.com/nest/sponsors/badge.svg" alt="Sponsors on Open Collective" /></a>
+  <a href="https://paypal.me/kamilmysliwiec" target="_blank"><img src="https://img.shields.io/badge/Donate-PayPal-ff3f59.svg" alt="Donate us"/></a>
+    <a href="https://opencollective.com/nest#sponsor"  target="_blank"><img src="https://img.shields.io/badge/Support%20us-Open%20Collective-41B883.svg" alt="Support us"></a>
+  <a href="https://twitter.com/nestframework" target="_blank"><img src="https://img.shields.io/twitter/follow/nestframework.svg?style=social&label=Follow" alt="Follow us on Twitter"></a>
+</p>
+  <!--[![Backers on Open Collective](https://opencollective.com/nest/backers/badge.svg)](https://opencollective.com/nest#backer)
+  [![Sponsors on Open Collective](https://opencollective.com/nest/sponsors/badge.svg)](https://opencollective.com/nest#sponsor)-->
+
+## Description
+
+[Nest](https://github.com/nestjs/nest) framework TypeScript starter repository.
+
+## Project setup
+
+```bash
+$ npm install
+```
+
+## Compile and run the project
+
+```bash
+# development
+$ npm run start
+
+# watch mode
+$ npm run start:dev
+
+# production mode
+$ npm run start:prod
+```
+
+## Run tests
+
+```bash
+# unit tests
+$ npm run test
+
+# e2e tests
+$ npm run test:e2e
+
+# test coverage
+$ npm run test:cov
+```
+
+## Deployment
+
+When you're ready to deploy your NestJS application to production, there are some key steps you can take to ensure it runs as efficiently as possible. Check out the [deployment documentation](https://docs.nestjs.com/deployment) for more information.
+
+If you are looking for a cloud-based platform to deploy your NestJS application, check out [Mau](https://mau.nestjs.com), our official platform for deploying NestJS applications on AWS. Mau makes deployment straightforward and fast, requiring just a few simple steps:
+
+```bash
+$ npm install -g @nestjs/mau
+$ mau deploy
+```
+
+With Mau, you can deploy your application in just a few clicks, allowing you to focus on building features rather than managing infrastructure.
+
+## Resources
+
+Check out a few resources that may come in handy when working with NestJS:
+
+- Visit the [NestJS Documentation](https://docs.nestjs.com) to learn more about the framework.
+- For questions and support, please visit our [Discord channel](https://discord.gg/G7Qnnhy).
+- To dive deeper and get more hands-on experience, check out our official video [courses](https://courses.nestjs.com/).
+- Deploy your application to AWS with the help of [NestJS Mau](https://mau.nestjs.com) in just a few clicks.
+- Visualize your application graph and interact with the NestJS application in real-time using [NestJS Devtools](https://devtools.nestjs.com).
+- Need help with your project (part-time to full-time)? Check out our official [enterprise support](https://enterprise.nestjs.com).
+- To stay in the loop and get updates, follow us on [X](https://x.com/nestframework) and [LinkedIn](https://linkedin.com/company/nestjs).
+- Looking for a job, or have a job to offer? Check out our official [Jobs board](https://jobs.nestjs.com).
+
+## Support
+
+Nest is an MIT-licensed open source project. It can grow thanks to the sponsors and support by the amazing backers. If you'd like to join them, please [read more here](https://docs.nestjs.com/support).
+
+## Stay in touch
+
+- Author - [Kamil Myśliwiec](https://twitter.com/kammysliwiec)
+- Website - [https://nestjs.com](https://nestjs.com/)
+- Twitter - [@nestframework](https://twitter.com/nestframework)
+
+## License
+
+Nest is [MIT licensed](https://github.com/nestjs/nest/blob/master/LICENSE).
+
+
+# ======================
+# File: tsconfig.build.json
+# ======================
+
+{
+  "extends": "./tsconfig.json",
+  "exclude": ["node_modules", "test", "dist", "**/*spec.ts"]
+}
+
+
+# ======================
+# File: tsconfig.json
+# ======================
+
+{
+  "compilerOptions": {
+    "module": "commonjs",
+    "declaration": true,
+    "removeComments": true,
+    "emitDecoratorMetadata": true,
+    "experimentalDecorators": true,
+    "allowSyntheticDefaultImports": true,
+    "target": "ES2023",
+    "sourceMap": true,
+    "outDir": "./dist",
+    "baseUrl": "./",
+    "incremental": true,
+    "skipLibCheck": true,
+    "strictNullChecks": true,
+    "forceConsistentCasingInFileNames": true,
+    "noImplicitAny": false,
+    "strictBindCallApply": false,
+    "noFallthroughCasesInSwitch": false
+  }
+}
+
+
+# ======================
+# File: test/app.e2e-spec.ts
+# ======================
+
+import { Test, TestingModule } from '@nestjs/testing';
+import { INestApplication } from '@nestjs/common';
+import * as request from 'supertest';
+import { App } from 'supertest/types';
+import { AppModule } from './../src/app.module';
+
+describe('AppController (e2e)', () => {
+  let app: INestApplication<App>;
+
+  beforeEach(async () => {
+    const moduleFixture: TestingModule = await Test.createTestingModule({
+      imports: [AppModule],
+    }).compile();
+
+    app = moduleFixture.createNestApplication();
+    await app.init();
+  });
+
+  it('/ (GET)', () => {
+    return request(app.getHttpServer())
+      .get('/')
+      .expect(200)
+      .expect('Hello World!');
+  });
+});
+
+
+# ======================
+# File: test/jest-e2e.json
+# ======================
+
+{
+  "moduleFileExtensions": ["js", "json", "ts"],
+  "rootDir": ".",
+  "testEnvironment": "node",
+  "testRegex": ".e2e-spec.ts$",
+  "transform": {
+    "^.+\\.(t|j)s$": "ts-jest"
+  }
+}
+
+
+# ======================
+# File: src/main.ts
+# ======================
+
+import { NestFactory } from '@nestjs/core';
+import { AppModule } from './app.module';
+import { LoggerService } from './common/logger/logger.service';
+import { ConfigService } from '@nestjs/config';
+import { LoggingInterceptor } from './interceptors/logging.interceptor';
+
+async function bootstrap() {
+  const app = await NestFactory.create(AppModule, {
+    bufferLogs: true,
+  });
+
+  const logger: LoggerService = app.get(LoggerService);
+  app.useLogger(logger);
+  app.useGlobalInterceptors(new LoggingInterceptor(logger));
+
+
+  const cfg = app.get(ConfigService);
+  const port = cfg.get<number>('port', { infer: true }) ?? 3000;
+  await app.listen(port);
+  logger.log(`🚀  Listening on http://localhost:${port}`, 'Bootstrap');
+}
+
+bootstrap();
+
+
+# ======================
+# File: src/app.service.ts
+# ======================
+
+import { Injectable } from '@nestjs/common';
+
+@Injectable()
+export class AppService {
+  getHello(): string {
+    return 'Hello World!';
+  }
+}
+
+
+# ======================
+# File: src/app.module.ts
+# ======================
+
+import { Module } from '@nestjs/common';
+import { AppController } from './app.controller';
+import { AppService } from './app.service';
+import { ConfigModule } from './common/config/config.module';
+import { DatabaseModule } from './database/database.module';
+import { LoggerModule } from './common/logger/logger.module';
+import { HealthModule } from './module/health/health.module';
+
+@Module({
+  imports: [ConfigModule, LoggerModule, DatabaseModule, HealthModule],
+  controllers: [AppController],
+  providers: [AppService],
+})
+export class AppModule {}
+
+
+# ======================
+# File: src/app.controller.spec.ts
+# ======================
+
+import { Test, TestingModule } from '@nestjs/testing';
+import { AppController } from './app.controller';
+import { AppService } from './app.service';
+
+describe('AppController', () => {
+  let appController: AppController;
+
+  beforeEach(async () => {
+    const app: TestingModule = await Test.createTestingModule({
+      controllers: [AppController],
+      providers: [AppService],
+    }).compile();
+
+    appController = app.get<AppController>(AppController);
+  });
+
+  describe('root', () => {
+    it('should return "Hello World!"', () => {
+      expect(appController.getHello()).toBe('Hello World!');
+    });
+  });
+});
+
+
+# ======================
+# File: src/app.controller.ts
+# ======================
+
+import { Controller, Get } from '@nestjs/common';
+import { AppService } from './app.service';
+
+@Controller()
+export class AppController {
+  constructor(private readonly appService: AppService) {}
+
+  @Get()
+  getHello(): string {
+    return this.appService.getHello();
+  }
+}
+
+
+# ======================
+# File: src/database/database.module.ts
+# ======================
+
+import { Module, OnModuleInit } from '@nestjs/common';
+import { InjectConnection, MongooseModule } from '@nestjs/mongoose';
+import { ConfigService } from '@nestjs/config';
+import { Connection } from 'mongoose';
+import { LoggerModule } from '../common/logger/logger.module';
+import { LoggerService } from '../common/logger/logger.service';
+
+@Module({
+  imports: [
+    // async so we can pull the URI from ConfigService
+    LoggerModule,
+    MongooseModule.forRootAsync({
+      useFactory: (config: ConfigService) => ({
+        uri: config.get<string>('mongo.uri'),
+        // dbName: 'iot',
+        // uriDecodeAuth: true,
+      }),
+      inject: [ConfigService],
+    }),
+  ],
+  exports: [MongooseModule],
+})
+export class DatabaseModule implements OnModuleInit {
+  constructor(
+    @InjectConnection() private readonly conn: Connection,
+    private readonly logger: LoggerService,
+  ) {}
+
+  onModuleInit(): void {
+    this.conn.once('connected', () =>
+      this.logger.log('✅  MongoDB connection established', DatabaseModule.name),
+    );
+    this.conn.on('error', (err) =>
+      this.logger.error(`❌  MongoDB connection error: ${err}`, undefined, DatabaseModule.name),
+    );
+  }
+}
+
+
+# ======================
+# File: src/interceptors/logging.interceptor.ts
+# ======================
+
+import { Injectable, CallHandler, ExecutionContext, NestInterceptor } from '@nestjs/common';
+import { Observable, tap } from 'rxjs';
+import { LoggerService } from '../common/logger/logger.service';
+
+@Injectable()
+export class LoggingInterceptor implements NestInterceptor {
+  constructor(private readonly logger: LoggerService) {}
+
+  intercept(context: ExecutionContext, next: CallHandler): Observable<any> {
+    const req = context.switchToHttp().getRequest();
+    const { method, url } = req;
+    const start = Date.now();
+
+    return next.handle().pipe(
+      tap(() => {
+        const ms = Date.now() - start;
+        this.logger.log(`${method} ${url} → ${ms} ms`, LoggingInterceptor.name);
+      }),
+    );
+  }
+}
+
+
+# ======================
+# File: src/module/health/health.module.ts
+# ======================
+
+import { Module } from '@nestjs/common';
+import { HealthController } from './health.controller';
+
+@Module({ controllers: [HealthController] })
+export class HealthModule {}
+
+
+# ======================
+# File: src/module/health/health.controller.ts
+# ======================
+
+import { Controller, Get } from '@nestjs/common';
+import { LoggerService } from '../../common/logger/logger.service';
+
+@Controller('health')
+export class HealthController {
+  constructor(private readonly logger: LoggerService) {}
+
+  @Get()
+  getHealth(): { status: string } {
+    this.logger.debug('Health check ping', HealthController.name);
+    return { status: 'ok' };
+  }
+}
+
+
+# ======================
+# File: src/common/logger/logger.service.ts
+# ======================
+
+/**
+ * Thin wrapper so we can add helper methods (e.g., logJSON)
+ * while still conforming to Nest's LoggerService interface.
+ */
+import {
+  Injectable,
+  LoggerService as NestLogger,
+  Inject,
+} from '@nestjs/common';
+import { WINSTON_MODULE_PROVIDER } from 'nest-winston';
+import type { Logger } from 'winston';
+
+@Injectable()
+export class LoggerService implements NestLogger {
+  constructor(
+    @Inject(WINSTON_MODULE_PROVIDER) private readonly logger: Logger,
+  ) {}
+
+  log(message: string, context?: string) {
+    this.logger.info(message, { context });
+  }
+  error(message: string, trace?: string, context?: string) {
+    this.logger.error(message, { context, trace });
+  }
+  warn(message: string, context?: string) {
+    this.logger.warn(message, { context });
+  }
+  debug(message: string, context?: string) {
+    this.logger.debug(message, { context });
+  }
+  verbose(message: string, context?: string) {
+    this.logger.verbose(message, { context });
+  }
+
+  /** Helper: log any object as prettified JSON at debug level */
+  logJSON(obj: unknown, context?: string) {
+    this.logger.debug(JSON.stringify(obj, null, 2), { context });
+  }
+}
+
+
+# ======================
+# File: src/common/logger/logger.module.ts
+# ======================
+
+import { Global, Module } from '@nestjs/common';
+import { WinstonModule } from 'nest-winston';
+import { ConfigModule, ConfigService } from '@nestjs/config';
+import { buildWinstonOptions } from './winston.config';
+import { LoggerService } from './logger.service';
+
+/**
+ * A global logger so every provider can just inject LoggerService.
+ */
+@Global()
+@Module({
+  imports: [
+    ConfigModule, // already global, but explicit for clarity
+    WinstonModule.forRootAsync({
+      inject: [ConfigService],
+      useFactory: buildWinstonOptions,
+    }),
+  ],
+  providers: [LoggerService],
+  exports: [LoggerService],
+})
+export class LoggerModule {}
+
+
+# ======================
+# File: src/common/logger/winston.config.ts
+# ======================
+
+/**
+ * Central Winston transport/format factory.
+ * We keep it separate so tests or future Lambdas can reuse it.
+ */
+import { utilities as nestFormat } from 'nest-winston';
+import { format, transports } from 'winston';
+import type { ConfigService } from '@nestjs/config';
+
+export const buildWinstonOptions = (config: ConfigService) => {
+  const logLevel = config.get<string>('logLevel') ?? 'debug';
+
+  return {
+    level: logLevel,
+    transports: [
+      new transports.Console({
+        format: format.combine(
+          format.timestamp({ format: 'YYYY-MM-DD HH:mm:ss' }),
+          // Colorize only in non‑prod for readability:
+          format.colorize({ all: process.env.NODE_ENV !== 'production' }),
+          nestFormat.format.nestLike(),
+        ),
+      }),
+      // 👉 Add file, CloudWatch, etc., here when needed
+    ],
+  };
+};
+
+
+# ======================
+# File: src/common/config/config.module.ts
+# ======================
+
+import { Global, Module } from '@nestjs/common';
+import { ConfigModule as NestConfigModule } from '@nestjs/config';
+import { envValidationSchema } from './env.validation';
+import appConfig from './appConfig';
+
+@Global()
+@Module({
+  imports: [
+    NestConfigModule.forRoot({
+      isGlobal: true,
+      load: [appConfig],
+      validationSchema: envValidationSchema,
+    }),
+  ],
+})
+export class ConfigModule {}
+
+
+# ======================
+# File: src/common/config/appConfig.ts
+# ======================
+
+export default () => ({
+  port: parseInt(process.env.PORT ?? '3000', 10),
+  mongo: {
+    uri: process.env.MONGO_URI,
+  },
+  logLevel: process.env.LOG_LEVEL ?? 'debug',
+});
+
+
+# ======================
+# File: src/common/config/env.validation.ts
+# ======================
+
+import * as Joi from 'joi';
+
+export const envValidationSchema = Joi.object({
+  NODE_ENV: Joi.string()
+    .valid('development', 'production', 'test')
+    .default('development'),
+  PORT: Joi.number().default(3000),
+  MONGO_URI: Joi.string().uri().required(),
+  LOG_LEVEL: Joi.string()
+    .valid('error', 'warn', 'info', 'http', 'verbose', 'debug', 'silly')
+    .default('debug'),
+});
