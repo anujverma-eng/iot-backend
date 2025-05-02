@@ -3,4 +3,5 @@ export default () => ({
   mongo: {
     uri: process.env.MONGO_URI,
   },
+  logLevel: process.env.LOG_LEVEL ?? 'debug',
 });
