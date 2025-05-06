@@ -3,6 +3,7 @@ import {
   IsMongoId,
   IsOptional,
   IsString,
+  Matches,
 } from 'class-validator';
 import { GatewayStatus } from '../enums/gateway.enum';
 
@@ -34,3 +35,12 @@ export class CreateGatewayDto {
 }
 
 export class UpdateGatewayDto extends CreateGatewayDto {}
+
+/** Accepts a printed claim‑ID, which is the gatewayId / ThingName */
+export class ClaimGatewayDto {
+  @IsString()
+  @Matches(/^gw_[A-Za-z0-9]+$/, {
+    message: 'claimId must look like gw_<alphanum>',
+  })
+  claimId!: string;
+}
