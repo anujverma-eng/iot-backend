@@ -6,6 +6,8 @@ import {
   UseGuards,
   HttpCode,
   HttpStatus,
+  BadRequestException,
+  Get,
 } from '@nestjs/common';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { RolesGuard } from '../auth/roles.guard';
@@ -26,5 +28,28 @@ export class OrganizationsController {
   async create(@Body() dto: CreateOrganizationDto, @Req() req: any) {
     const org = await this.svc.createOrgAndSetOwner(req.user.userId, dto);
     return org;
+  }
+
+  @UseGuards(JwtAuthGuard)
+  @Get('me')
+  async getMe(@Req() req: Request) {
+    const { orgId } = (req as any).user ?? {};
+    if (!orgId) throw new BadRequestException('You are not in an organization');
+
+    const org = await this.svc.findByIdWithPlan(orgId) as any;
+
+    return {
+      _id: org._id,
+      name: org.name,
+      needsUpgrade: org.needsUpgrade,
+      plan: {
+        name: org.planId.name,
+        maxGateways: org.planId.maxGateways,
+        maxSensors: org.planId.maxSensors,
+        maxUsers: org.planId.maxUsers,
+        retentionDays: org.planId.retentionDays,
+      },
+      createdAt: org.createdAt,
+    };
   }
 }

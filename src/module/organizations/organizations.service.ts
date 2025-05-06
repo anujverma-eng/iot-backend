@@ -1,4 +1,8 @@
-import { BadRequestException, Injectable } from '@nestjs/common';
+import {
+  BadRequestException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Organization, OrganizationDocument } from './organizations.schema';
 import { Model, Types } from 'mongoose';
@@ -19,7 +23,10 @@ export class OrganizationsService {
     private readonly userModel: Model<UserDocument>,
   ) {}
 
-  async createOrgAndSetOwner(ownerId: Types.ObjectId, dto: CreateOrganizationDto) {
+  async createOrgAndSetOwner(
+    ownerId: Types.ObjectId,
+    dto: CreateOrganizationDto,
+  ) {
     /* ensure caller is not in an org already */
     const caller = await this.userModel.findById(ownerId).lean();
     if (!caller) throw new BadRequestException('User not found');
@@ -63,5 +70,16 @@ export class OrganizationsService {
     } finally {
       session.endSession();
     }
+  }
+
+  async findByIdWithPlan(id: Types.ObjectId | string) {
+    const org = await this.orgModel
+      .findById(id)
+      .populate('planId')
+      .lean()
+      .exec();
+
+    if (!org) throw new NotFoundException('Organization not found');
+    return org;
   }
 }
