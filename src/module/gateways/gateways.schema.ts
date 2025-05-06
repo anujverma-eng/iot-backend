@@ -29,9 +29,8 @@ export class Gateway {
   })
   status: GatewayStatus;
 
-  // optional / future
-  @Prop()
-  claimCode?: string;
+  @Prop({ required: true, length: 6, index: true })
+  claimCode: string;
 
   @Prop()
   firmwareVersion?: string;
@@ -64,3 +63,4 @@ export class Gateway {
 export const GatewaySchema = SchemaFactory.createForClass(Gateway);
 
 GatewaySchema.index({ orgId: 1 });
+GatewaySchema.index({ claimCode: 1 }, { unique: true });

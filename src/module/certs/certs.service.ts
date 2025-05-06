@@ -20,7 +20,7 @@ export class CertsService {
   private readonly iot: IoTClient;
 
   constructor(
-    private readonly s3: S3Service,
+    private readonly s3Svc: S3Service,
     cfg: ConfigService,
   ) {
     this.iot = new IoTClient({ region: cfg.get('aws.region') });
@@ -52,10 +52,10 @@ export class CertsService {
     const ts = DateTime.now().toFormat('yyyyLLddHHmmss');
     const zipKey = `gateways/${thingName}/${ts}.zip`;
 
-    await this.s3.putObject(zipKey, zipBuf, {
+    await this.s3Svc.putObject(zipKey, zipBuf, {
       ContentType: 'application/zip',
     });
-    const presigned = await this.s3.presign(zipKey);
+    const presigned = await this.s3Svc.presign(zipKey);
 
     return {
       certId: cert.certificateId!,
@@ -65,5 +65,16 @@ export class CertsService {
       packS3Key: zipKey,
       download: presigned,
     };
+  }
+
+  // src/module/certs/certs.service.ts  (add to class)
+  async addFileToPack(zipKey: string, fileName: string, contents: string) {
+    const orig = await this.s3Svc.getObjectAsBuffer(zipKey);
+    const zip = await JSZip.loadAsync(orig);
+    zip.file(fileName, contents);
+    const newBuf = await zip.generateAsync({ type: 'nodebuffer' });
+    await this.s3Svc.putObject(zipKey, newBuf, {
+      ContentType: 'application/zip',
+    });
   }
 }

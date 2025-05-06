@@ -5,7 +5,7 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { randomUUID } from 'node:crypto';
+import { randomUUID, randomBytes } from 'node:crypto';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
 import { Gateway, GatewayDocument } from './gateways.schema';
@@ -15,6 +15,7 @@ import {
 } from '../organizations/organizations.schema';
 import { GatewayStatus } from './enums/gateway.enum';
 import { CertsService } from '../certs/certs.service';
+import { ClaimGatewayDto } from './dto/gateway.dto';
 
 @Injectable()
 export class GatewaysService {
@@ -33,10 +34,12 @@ export class GatewaysService {
 
     const gatewayId = `gw_${randomUUID().slice(0, 8)}`;
     const bundle = await this.certsSvc.provisionGateway(gatewayId, mac);
+    const claimCode = this.genCode();
 
     const saved = await this.gwModel.create({
       _id: gatewayId,
       mac,
+      claimCode,
       certId: bundle.certId,
       certPem: bundle.certPem,
       keyPem: bundle.keyPem,
@@ -44,6 +47,13 @@ export class GatewaysService {
       packS3Key: bundle.packS3Key,
       status: GatewayStatus.UNCLAIMED,
     });
+
+    /* ➕ add file to zip */
+    await this.certsSvc.addFileToPack(
+      bundle.packS3Key,
+      'claim-code.txt',
+      claimCode,
+    );
 
     return { ...saved.toObject(), downloadUrl: bundle.download };
   }
@@ -62,15 +72,18 @@ export class GatewaysService {
   }
 
   /** Claim a factory gateway for an org, enforcing plan.maxGateways */
-  async claimForOrg(orgId: string, claimId: string) {
-    /* 1️⃣ find unclaimed gateway */
-    const gw = (await this.gwModel
-      .findOne({ _id: claimId, orgId: null })
-      .exec()) as any;
+  async claimForOrg(orgId: string, dto: ClaimGatewayDto) {
+    /* 1️ find unclaimed gateway */
+    const gw = (await this.gwModel.findOne({
+      _id: dto.claimId,
+      orgId: null,
+      claimCode: dto.claimCode,
+    })) as any;
+
     if (!gw)
       throw new NotFoundException('Claim ID not found or already claimed');
 
-    /* 2️⃣ load org + plan limits */
+    /* 2️ load org + plan limits */
     const org = await this.orgModel
       .findById(orgId)
       .populate<{
@@ -89,11 +102,19 @@ export class GatewaysService {
       throw new ForbiddenException('Gateway limit exceeded – upgrade plan');
     }
 
-    /* 3️⃣ attach gateway to org */
+    /* 3️ attach gateway to org */
     gw.orgId = org._id;
     gw.status = GatewayStatus.CLAIMED;
     await gw.save();
 
     return gw.toObject();
+  }
+
+  genCode() {
+    return randomBytes(4)
+      .toString('base64') // 6 chars like “Xa9oZQ==”
+      .replace(/[^A-Z0-9]/gi, '') // strip symbols
+      .slice(0, 6)
+      .toUpperCase();
   }
 }

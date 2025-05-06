@@ -38,6 +38,6 @@ export class GatewaysController {
   @Post('claim')
   async claim(@Req() req: Request, @Body() dto: ClaimGatewayDto) {
     const { orgId } = (req as any).user ?? {};
-    return this.gwSvc.claimForOrg(orgId, dto.claimId);
+    return this.gwSvc.claimForOrg(orgId, dto);
   }
 }

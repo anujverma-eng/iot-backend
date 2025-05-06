@@ -7,6 +7,7 @@ import {
   IsMongoId,
   IsOptional,
   IsString,
+  Length,
   Matches,
 } from 'class-validator';
 import { GatewayStatus } from '../enums/gateway.enum';
@@ -47,6 +48,10 @@ export class ClaimGatewayDto {
     message: 'claimId must look like gw_<alphanum>',
   })
   claimId!: string;
+
+  @IsString()
+  @Length(6, 6)
+  claimCode!: string;
 }
 
 export class AdminCreateGatewayDto {
@@ -67,6 +72,6 @@ export class BulkGatewaysDto {
   /** 1‑10 MAC addresses per call */
   @ArrayMinSize(1)
   @ArrayMaxSize(10)
-  // @IsMACAddress({ each: true, noColons: false })
+  @IsMACAddress(undefined, { each: true })
   macs!: string[];
 }
