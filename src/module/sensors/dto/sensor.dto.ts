@@ -6,6 +6,7 @@ import {
   IsString,
 } from 'class-validator';
 import { SensorType } from '../enums/sensor.enum';
+import { Expose, Transform } from 'class-transformer';
 
 export class CreateSensorDto {
   @IsString()
@@ -45,3 +46,40 @@ export class CreateSensorDto {
 }
 
 export class UpdateSensorDto extends CreateSensorDto {}
+
+export class SensorResponseDto {
+  @Expose()
+  _id: string;
+
+  @Expose()
+  mac: string;
+
+  @Expose()
+  type?: SensorType;
+
+  @Expose()
+  unit?: string;
+
+  @Expose()
+  displayName?: string;
+  
+  @Expose()
+  lastValue?: number;
+
+  @Expose()
+  lastUnit?: string;
+
+  @Expose()
+  lastSeen?: Date;
+
+  @Expose()
+  ignored: boolean;
+
+  /** strip Mongo internals */
+  @Transform(() => undefined, { toPlainOnly: true })
+  __v?: never;
+  @Transform(() => undefined, { toPlainOnly: true })
+  createdAt?: never;
+  @Transform(() => undefined, { toPlainOnly: true })
+  updatedAt?: never;
+}
