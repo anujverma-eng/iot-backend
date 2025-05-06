@@ -1,5 +1,9 @@
 import {
+  ArrayMaxSize,
+  ArrayMinSize,
+  IsArray,
   IsEnum,
+  IsMACAddress,
   IsMongoId,
   IsOptional,
   IsString,
@@ -43,4 +47,26 @@ export class ClaimGatewayDto {
     message: 'claimId must look like gw_<alphanum>',
   })
   claimId!: string;
+}
+
+export class AdminCreateGatewayDto {
+  /** Factory‑printed MAC on the sticker */
+  @IsMACAddress() mac!: string;
+
+  /** Optional human label shown in dashboard before claim */
+  @IsOptional() @IsString()
+  label?: string;
+}
+
+
+export class CreateGatewayAdminDto {
+  @IsMACAddress() mac!: string;
+}
+
+export class BulkGatewaysDto {
+  /** 1‑10 MAC addresses per call */
+  @ArrayMinSize(1)
+  @ArrayMaxSize(10)
+  // @IsMACAddress({ each: true, noColons: false })
+  macs!: string[];
 }

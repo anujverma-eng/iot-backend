@@ -7,16 +7,21 @@ import {
   Organization,
   OrganizationSchema,
 } from '../organizations/organizations.schema';
+import { CertsService } from '../certs/certs.service';
+import { S3Service } from 'src/common/aws/s3.service';
+import { UsersService } from '../users/users.service';
+import { User, UserSchema } from '../users/users.schema';
 
 @Module({
   imports: [
     MongooseModule.forFeature([
       { name: Gateway.name, schema: GatewaySchema },
       { name: Organization.name, schema: OrganizationSchema },
+      { name: User.name, schema: UserSchema },
     ]),
   ],
   controllers: [GatewaysController],
-  providers: [GatewaysService],
+  providers: [GatewaysService, CertsService, S3Service, UsersService],
   exports: [MongooseModule, GatewaysService],
 })
 export class GatewaysModule {}

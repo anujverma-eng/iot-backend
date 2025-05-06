@@ -46,6 +46,19 @@ export class Gateway {
 
   @Prop()
   lastSeen?: Date;
+
+  @Prop()
+  certPem?: string;
+
+  @Prop()
+  keyPem?: string;
+
+  @Prop()
+  caPem?: string;
+
+  /** S3 key inside iot‑cert‑packs bucket */
+  @Prop()
+  packS3Key?: string;
 }
 
 export const GatewaySchema = SchemaFactory.createForClass(Gateway);

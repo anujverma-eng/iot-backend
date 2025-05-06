@@ -30,7 +30,6 @@ export class OrganizationsController {
     return org;
   }
 
-  @UseGuards(JwtAuthGuard)
   @Get('me')
   async getMe(@Req() req: Request) {
     const { orgId } = (req as any).user ?? {};
