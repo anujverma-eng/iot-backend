@@ -9,7 +9,7 @@ export class User {
   @Prop({
     type: Types.ObjectId,
     ref: 'Organization',
-    required: true,
+    required: false,
   })
   orgId: Types.ObjectId;
 
@@ -19,8 +19,8 @@ export class User {
   @Prop()
   displayName?: string;
 
-  @Prop({ required: true })
-  cognitoSub: string;
+  @Prop({ required: false })
+  cognitoSub?: string;
 
   @Prop({
     enum: UserRole,

@@ -1,13 +1,17 @@
-import { IsMongoId, IsOptional, IsString } from 'class-validator';
+import { IsMongoId, IsOptional, IsString, Length } from 'class-validator';
 
 export class CreateOrganizationDto {
-  @IsString() name: string;
+  @IsString()
+  @Length(2, 60)
+  name: string;
 
   @IsOptional()
   @IsString()
   domain?: string;
 
-  @IsMongoId() planId: string;
+  @IsOptional()
+  @IsMongoId()
+  planId?: string;
 }
 
 export class UpdateOrganizationDto extends CreateOrganizationDto {}

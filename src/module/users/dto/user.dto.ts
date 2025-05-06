@@ -18,8 +18,9 @@ export class CreateUserDto {
   @IsString()
   displayName?: string;
 
+  @IsOptional()         // was @IsString() (required)
   @IsString()
-  cognitoSub: string;
+  cognitoSub?: string;
 
   @IsEnum(UserRole)
   role: UserRole;
@@ -29,3 +30,14 @@ export class CreateUserDto {
 }
 
 export class UpdateUserDto extends CreateUserDto {}
+
+
+export class InviteUserDto {
+  @IsEmail()
+  email: string;
+
+  /** Optional role override (member by default) */
+  @IsOptional()
+  @IsEnum(UserRole)
+  role: UserRole = UserRole.MEMBER;
+}

@@ -6,6 +6,7 @@ import {
   HttpStatus,
 } from '@nestjs/common';
 import { Request, Response } from 'express';
+import type { Error as MongooseError } from 'mongoose';
 import { LoggerService } from '../logger/logger.service';
 
 @Catch()
@@ -32,6 +33,26 @@ export class GlobalExceptionFilter implements ExceptionFilter {
         success    : false,
         statusCode : status,
         message    : payload,
+        timestamp  : new Date().toISOString(),
+        path       : request.url,
+        from       : 'iot‑backend | GlobalExceptionFilter',
+      });
+    }
+
+    if ((exception as any).name === 'ValidationError') {
+      const err = exception as MongooseError.ValidationError;
+      const messages = Object.values(err.errors).map(e => e.message);
+    
+      this.logger.error(
+        messages.join('; '),
+        undefined,
+        GlobalExceptionFilter.name,
+      );
+    
+      return response.status(HttpStatus.BAD_REQUEST).json({
+        success    : false,
+        statusCode : HttpStatus.BAD_REQUEST,
+        message    : messages,
         timestamp  : new Date().toISOString(),
         path       : request.url,
         from       : 'iot‑backend | GlobalExceptionFilter',

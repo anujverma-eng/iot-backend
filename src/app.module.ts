@@ -12,12 +12,17 @@ import { GatewaysModule } from './module/gateways/gateways.module';
 import { SensorsModule } from './module/sensors/sensors.module';
 import { NotificationsModule } from './module/notifications/notifications.module';
 import { RogueGatewaysModule } from './module/rogue-gateways/rogue-gateways.module';
+import { APP_GUARD } from '@nestjs/core';
+import { JwtAuthGuard } from './module/auth/jwt-auth.guard';
+import { RolesGuard } from './module/auth/roles.guard';
+import { AuthModule } from './module/auth/auth.module';
 
 @Module({
   imports: [
     ConfigModule,
     LoggerModule,
     DatabaseModule,
+    AuthModule,
     HealthModule,
     PlansModule,
     OrganizationsModule,
@@ -28,6 +33,16 @@ import { RogueGatewaysModule } from './module/rogue-gateways/rogue-gateways.modu
     RogueGatewaysModule,
   ],
   controllers: [AppController],
-  providers: [AppService],
+  providers: [
+    AppService,
+    {
+      provide : APP_GUARD,
+      useClass: JwtAuthGuard,
+    },
+    {
+      provide : APP_GUARD,
+      useClass: RolesGuard,
+    },
+  ],
 })
 export class AppModule {}

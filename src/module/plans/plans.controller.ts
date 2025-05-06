@@ -9,11 +9,14 @@ import {
 } from '@nestjs/common';
 import { PlansService } from './plans.service';
 import { CreatePlanDto, UpdatePlanDto } from './dto/plan.dto';
+import { Roles } from '../auth/roles.decorator';
+import { UserRole } from '../users/enums/users.enum';
 
 @Controller('plans')
 export class PlansController {
   constructor(private readonly plansService: PlansService) {}
 
+  @Roles(UserRole.ADMIN)
   @Post()
   create(@Body() dto: CreatePlanDto) {
     return this.plansService.create(dto);

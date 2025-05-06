@@ -9,4 +9,11 @@ export const envValidationSchema = Joi.object({
   LOG_LEVEL: Joi.string()
     .valid('error', 'warn', 'info', 'http', 'verbose', 'debug', 'silly')
     .default('debug'),
+  COGNITO_REGION: Joi.string().required(),
+  COGNITO_USER_POOL_ID: Joi.string().required(),
+  COGNITO_APP_CLIENT_ID: Joi.string().required(),
+  COGNITO_DOMAIN: Joi.string().required(),
+  // AWS_ACCESS_KEY_ID: Joi.string().required(),
+  // AWS_SECRET_ACCESS_KEY: Joi.string().required(),
+  // AWS_REGION: Joi.string().required(),
 });
