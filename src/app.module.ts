@@ -16,6 +16,8 @@ import { APP_GUARD } from '@nestjs/core';
 import { JwtAuthGuard } from './module/auth/jwt-auth.guard';
 import { RolesGuard } from './module/auth/roles.guard';
 import { AuthModule } from './module/auth/auth.module';
+import { TelemetryModule } from './module/telemetry/telemetry.module';
+import { IotModule } from './module/iot/iot.module';
 
 @Module({
   imports: [
@@ -31,6 +33,8 @@ import { AuthModule } from './module/auth/auth.module';
     SensorsModule,
     NotificationsModule,
     RogueGatewaysModule,
+    TelemetryModule,
+    IotModule,
   ],
   controllers: [AppController],
   providers: [

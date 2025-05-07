@@ -5,15 +5,17 @@ export default () => ({
   },
   logLevel: process.env.LOG_LEVEL ?? 'debug',
   cognito: {
-    region     : process.env.COGNITO_REGION,
-    userPoolId : process.env.COGNITO_USER_POOL_ID,
-    clientId   : process.env.COGNITO_APP_CLIENT_ID,
-    domain     : process.env.COGNITO_DOMAIN,
+    region: process.env.COGNITO_REGION,
+    userPoolId: process.env.COGNITO_USER_POOL_ID,
+    clientId: process.env.COGNITO_APP_CLIENT_ID,
+    domain: process.env.COGNITO_DOMAIN,
+    identityPoolId: process.env.COGNITO_IDENTITY_POOL_ID,
   },
   aws: {
     accessKeyId: process.env.AWS_ACCESS_KEY_ID,
     accessSecretKey: process.env.AWS_SECRET_ACCESS_KEY,
     region: process.env.AWS_REGION,
-    certBucket: process.env.AWS_CERT_BUCKET
+    certBucket: process.env.AWS_CERT_BUCKET,
+    iotEndpoint: process.env.IOT_ENDPOINT,
   },
 });
