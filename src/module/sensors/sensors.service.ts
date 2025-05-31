@@ -19,9 +19,11 @@ export class SensorsService {
   ) {}
 
   async getMeta(ids: string[]) {
-  const docs = await this.sensorModel.find({ _id: { $in: ids } }, { mac:1, type:1, unit:1 }).lean();
-  return Object.fromEntries(docs.map(d => [d._id, d]));
-}
+    const docs = await this.sensorModel
+      .find({ _id: { $in: ids } }, { mac: 1, type: 1, unit: 1 })
+      .lean();
+    return Object.fromEntries(docs.map((d) => [d._id, d]));
+  }
 
   /** Return sensors for a gateway, scoped to caller’s org */
   async paginateByGateway(
@@ -70,8 +72,14 @@ export class SensorsService {
   ) {
     const { page, limit, claimed, search, sort, dir } = opts;
 
+    // 1. Find all gateway IDs for this org
+    const gateways = await this.gwModel.find({ orgId }, { _id: 1 }).lean();
+    const gatewayIds = gateways.map((gw) => gw._id);
+
+    // 2. Build query to only include sensors seen by these gateways
     const base: any = {
       ignored: { $ne: true },
+      lastSeenBy: { $in: gatewayIds },
       $or: [{ orgId }, { orgId: null }],
     };
     if (claimed !== undefined) base.claimed = claimed === 'true';

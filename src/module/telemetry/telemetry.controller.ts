@@ -8,18 +8,16 @@ import {
   Query,
   UseGuards,
 } from '@nestjs/common';
-import { TelemetryService } from './telemetry.service';
-import {
-  BucketQueryDto,
-  TelemetryQuery,
-  TelemetryQueryBody,
-} from './dto/telemetry.dto';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
-import { RolesGuard } from '../auth/roles.guard';
 import { Roles } from '../auth/roles.decorator';
-import { UserRole } from '../users/enums/users.enum';
-import { Public } from '../auth/public.decorator';
+import { RolesGuard } from '../auth/roles.guard';
 import { SensorsService } from '../sensors/sensors.service';
+import { UserRole } from '../users/enums/users.enum';
+import {
+  TelemetryQuery,
+  TelemetryQueryBody
+} from './dto/telemetry.dto';
+import { TelemetryService } from './telemetry.service';
 
 @Controller('telemetry')
 @UseGuards(JwtAuthGuard, RolesGuard)
@@ -30,6 +28,7 @@ export class TelemetryController {
   ) {}
 
   @Get('by-sensor/:id')
+  @Roles(UserRole.OWNER)
   async bySensor(@Param('id') id: string, @Query() q: TelemetryQuery) {
     const rows = await this.svc.findBySensor(id, {
       from: q.from ? new Date(q.from) : undefined,
@@ -39,10 +38,8 @@ export class TelemetryController {
     return { data: rows };
   }
 
-  // @Roles(UserRole.MEMBER, UserRole.VIEWER, UserRole.ADMIN, UserRole.OWNER)
   @Post('query')
-  // @Roles(UserRole.MEMBER, UserRole.VIEWER, UserRole.ADMIN, UserRole.OWNER)
-  @Public()
+  @Roles(UserRole.OWNER)
   async queryPost(@Body() body: TelemetryQueryBody) {
     const { sensorIds, timeRange, bucketSize } = body;
 

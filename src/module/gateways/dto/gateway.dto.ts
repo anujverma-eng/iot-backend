@@ -1,13 +1,11 @@
 import {
   ArrayMaxSize,
   ArrayMinSize,
-  IsArray,
   IsEnum,
   IsMACAddress,
   IsMongoId,
   IsOptional,
   IsString,
-  Length,
   Matches,
 } from 'class-validator';
 import { GatewayStatus } from '../enums/gateway.enum';
@@ -60,7 +58,10 @@ export class BulkGatewaysDto {
 
 export class RegisterGatewayDto {
   /** Factory-printed MAC on sticker */
-  @IsMACAddress() mac!: string;
+  @Matches(/^([0-9A-F]{2}:){3,5}[0-9A-F]{2}$/i, {
+    message: 'mac must be 4-octet or 6-octet colon-separated hex',
+  })
+  mac!: string;
 
   /** Optional human-friendly label shown in dashboard before first ping */
   @IsOptional()

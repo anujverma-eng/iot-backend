@@ -11,7 +11,6 @@ import {
 } from '@nestjs/common';
 import { normLimit, normPage } from 'src/common/utils/pagination';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
-import { Public } from '../auth/public.decorator';
 import { Roles } from '../auth/roles.decorator';
 import { RolesGuard } from '../auth/roles.guard';
 import { UserRole } from '../users/enums/users.enum';
@@ -27,27 +26,25 @@ import { GatewaysService } from './gateways.service';
 export class GatewaysController {
   constructor(private readonly gwSvc: GatewaysService) {}
 
-  // @Roles(UserRole.ADMIN)
-  @Public()
+  @Roles(UserRole.ADMIN)
   @Post('admin/create-one')
   createOne(@Body() dto: CreateGatewayAdminDto) {
     return this.gwSvc.adminCreateOne(dto.mac);
   }
 
-  // @Roles(UserRole.ADMIN)
-  @Public()
+  @Roles(UserRole.ADMIN)
   @Post('admin/bulk')
   async adminBulkCreate(@Body() dto: BulkGatewaysDto) {
     return this.gwSvc.adminCreateBulk(dto.macs);
   }
 
-  @Roles(UserRole.MEMBER, UserRole.ADMIN, UserRole.OWNER)
+  @Roles(UserRole.OWNER)
   @Post('register')
   async register(@Req() req: any, @Body() dto: RegisterGatewayDto) {
     return this.gwSvc.registerForOrg(req.user.orgId, dto);
   }
 
-  @Roles(UserRole.MEMBER, UserRole.VIEWER, UserRole.ADMIN, UserRole.OWNER)
+  @Roles(UserRole.OWNER)
   @Get()
   async listMine(
     @Req() req: any,
@@ -73,13 +70,13 @@ export class GatewaysController {
   }
 
   @Get('stats')
-  @Roles(UserRole.MEMBER, UserRole.VIEWER, UserRole.ADMIN, UserRole.OWNER)
+  @Roles(UserRole.OWNER)
   getStats(@Req() req: any) {
     return this.gwSvc.getStats(req.user.orgId);
   }
 
   @Get(':id/sensors')
-  @Roles(UserRole.MEMBER, UserRole.VIEWER, UserRole.ADMIN, UserRole.OWNER)
+  @Roles(UserRole.OWNER)
   async sensorsForGateway(
     @Param('id') id: string,
     @Req() req: any,
@@ -113,14 +110,14 @@ export class GatewaysController {
     };
   }
 
-  @Roles(UserRole.MEMBER, UserRole.VIEWER, UserRole.ADMIN, UserRole.OWNER)
+  @Roles(UserRole.OWNER)
   @Get(':id')
   async getOne(@Param('id') id: string, @Req() req: any) {
     return this.gwSvc.getDetails(id, req.user.orgId);
   }
 
   @Patch(':id')
-  @Roles(UserRole.MEMBER, UserRole.ADMIN, UserRole.OWNER)
+  @Roles(UserRole.OWNER)
   update(
     @Param('id') id: string,
     @Req() req: any,
@@ -130,7 +127,7 @@ export class GatewaysController {
   }
 
   @Post(':id/sensors')
-  @Roles(UserRole.MEMBER, UserRole.ADMIN, UserRole.OWNER)
+  @Roles(UserRole.OWNER)
   addSensorsToGateway(
     @Param('id') id: string,
     @Body('macs') macs: string[],

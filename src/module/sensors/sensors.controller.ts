@@ -25,7 +25,7 @@ export class SensorsController {
   constructor(private readonly svc: SensorsService) {}
 
   /** GET /sensors/by-gateway/:gatewayId */
-  @Roles(UserRole.MEMBER, UserRole.VIEWER, UserRole.OWNER)
+  @Roles(UserRole.OWNER)
   @Get('by-gateway/:gatewayId')
   async listByGateway(
     @Param('gatewayId') gatewayId: string,
@@ -56,7 +56,7 @@ export class SensorsController {
 
   /** GET /sensors   – all sensors in my organization (paginated) */
   @Get()
-  @Roles(UserRole.MEMBER, UserRole.VIEWER, UserRole.ADMIN, UserRole.OWNER)
+  @Roles(UserRole.OWNER)
   async listAllMine(
     @Query()
     q: {
@@ -91,7 +91,7 @@ export class SensorsController {
 
   /** POST /sensors/claim */
   @Post('claim')
-  @Roles(UserRole.MEMBER, UserRole.ADMIN, UserRole.OWNER)
+  @Roles(UserRole.OWNER)
   async claim(@Req() req: any, @Body() dto: ClaimSensorDto) {
     return this.svc.claimForUser(
       { orgId: req.user.orgId, role: req.user.role },
@@ -101,12 +101,12 @@ export class SensorsController {
 
   /** GET /sensors/stats  – simple dashboard card */
   @Get('stats')
-  @Roles(UserRole.MEMBER, UserRole.VIEWER, UserRole.ADMIN, UserRole.OWNER)
+  @Roles(UserRole.OWNER)
   getStats(@Req() req: any) {
     return this.svc.getStats(req.user.orgId);
   }
 
-  @Roles(UserRole.MEMBER, UserRole.VIEWER, UserRole.ADMIN, UserRole.OWNER)
+  @Roles(UserRole.OWNER)
   @Get(':mac')
   async getOne(@Param('mac') mac: string, @Req() req: any) {
     return this.svc.getDetails(mac.toUpperCase(), req.user.orgId);
@@ -114,7 +114,7 @@ export class SensorsController {
 
   /** PATCH /sensors/:mac – rename / toggle fields (currently label only) */
   @Patch(':mac')
-  @Roles(UserRole.MEMBER, UserRole.ADMIN, UserRole.OWNER)
+  @Roles(UserRole.OWNER)
   updateSensor(
     @Param('mac') mac: string,
     @Req() req: any,
@@ -125,7 +125,7 @@ export class SensorsController {
 
   /** POST /sensors/:mac/claim   */
   @Post(':mac/claim')
-  @Roles(UserRole.MEMBER, UserRole.ADMIN, UserRole.OWNER)
+  @Roles(UserRole.OWNER)
   claimSensor(
     @Param('mac') mac: string,
     @Req() req: any,
@@ -139,7 +139,7 @@ export class SensorsController {
 
   /** POST /sensors/:mac/unclaim  */
   @Post(':mac/unclaim')
-  @Roles(UserRole.MEMBER, UserRole.ADMIN, UserRole.OWNER)
+  @Roles(UserRole.OWNER)
   unclaimSensor(@Param('mac') mac: string, @Req() req: any) {
     return this.svc.unclaim(mac.toUpperCase(), req.user.orgId);
   }

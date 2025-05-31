@@ -24,13 +24,14 @@ export class OrganizationsController {
   /** First‑time org creation */
   @Post()
   @HttpCode(HttpStatus.CREATED)
-  @Roles(UserRole.VIEWER, UserRole.ADMIN, UserRole.OWNER)
+  @Roles(UserRole.OWNER)
   async create(@Body() dto: CreateOrganizationDto, @Req() req: any) {
     const org = await this.svc.createOrgAndSetOwner(req.user.userId, dto);
     return org;
   }
 
   @Get('me')
+  @Roles(UserRole.OWNER)
   async getMe(@Req() req: Request) {
     const { orgId } = (req as any).user ?? {};
     if (!orgId) throw new BadRequestException('You are not in an organization');
