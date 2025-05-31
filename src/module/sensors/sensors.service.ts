@@ -9,6 +9,7 @@ import {
 } from '@nestjs/common';
 import { UserRole } from '../users/enums/users.enum';
 import { ClaimSensorDto } from './dto/sensor.dto';
+import { Telemetry } from '../telemetry/telemetry.schema';
 
 @Injectable()
 export class SensorsService {
@@ -16,6 +17,8 @@ export class SensorsService {
     @InjectModel(Sensor.name)
     private readonly sensorModel: Model<SensorDocument>,
     @InjectModel(Gateway.name) private readonly gwModel: Model<GatewayDocument>,
+    @InjectModel(Telemetry.name)
+    private readonly telemetryModel: Model<Telemetry>,
   ) {}
 
   async getMeta(ids: string[]) {
@@ -72,29 +75,50 @@ export class SensorsService {
   ) {
     const { page, limit, claimed, search, sort, dir } = opts;
 
-    // 1. Find all gateway IDs for this org
+    // 1. find all gateway IDs for this org
     const gateways = await this.gwModel.find({ orgId }, { _id: 1 }).lean();
     const gatewayIds = gateways.map((gw) => gw._id);
 
-    // 2. Build query to only include sensors seen by these gateways
+    // 2. build the “base” query for sensors in those gateways
     const base: any = {
       ignored: { $ne: true },
       lastSeenBy: { $in: gatewayIds },
       $or: [{ orgId }, { orgId: null }],
     };
-    if (claimed !== undefined) base.claimed = claimed === 'true';
-    if (search?.trim()) {
-      const rx = new RegExp(search.trim(), 'i');
-      base.$or.push({ mac: rx }, { displayName: rx });
+
+    // 3. filter by claimed if provided
+    if (claimed !== undefined) {
+      base.claimed = claimed === 'true';
     }
 
+    // 4. text‐index search if “search” is non‐empty
+    if (search?.trim()) {
+      // Use $text so Mongo uses the text index on { mac, displayName }
+      base.$text = { $search: search.trim() };
+    }
+
+    // 5. count total matching docs
     const total = await this.sensorModel.countDocuments(base);
+
+    const sortField = sort || 'lastSeen';
+    const sortOrder = dir === 'asc' ? 1 : -1;
+
+    // For simplicity, if you don’t care about sorting by relevance, always sort on sortField:
     const rows = await this.sensorModel
       .find(base)
-      .sort({ [sort || 'lastSeen']: dir === 'asc' ? 1 : -1 })
+      .sort({ [sortField]: sortOrder })
       .skip((page - 1) * limit)
       .limit(limit)
       .lean();
+
+    // 7. populate lastValue (latest telemetry)
+    for (const sensor of rows as any) {
+      const lastReading = await this.telemetryModel
+        .findOne({ sensorId: sensor._id })
+        .sort({ ts: -1 })
+        .lean();
+      sensor.lastValue = lastReading?.value || 0;
+    }
 
     return { rows, total };
   }

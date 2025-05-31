@@ -108,61 +108,113 @@ export class GatewaysService {
     opts: { page: number; limit: number; search?: string },
   ) {
     const { page, limit, search } = opts;
-    const matchStage: PipelineStage.Match = {
+
+    // 1. Always match on orgId
+    const baseMatch: PipelineStage.Match = {
       $match: { orgId: new Types.ObjectId(orgId) },
     };
 
+    // 2. If `search` is supplied, create a case-insensitive regex
+    //    and also match against `mac` OR `label`. Otherwise, skip it.
+    const searchStage: PipelineStage.Match | null = search
+      ? {
+          $match: {
+            $or: [
+              { mac: { $regex: search.trim(), $options: 'i' } },
+              { label: { $regex: search.trim(), $options: 'i' } },
+            ],
+          },
+        }
+      : null;
+
+    // 3. This $lookup will count how many sensors (grouped by `claimed`) each gateway has
     const sensorCountsLookup: PipelineStage.Lookup = {
       $lookup: {
         from: 'sensors',
         let: { gwId: '$_id' },
         pipeline: [
-          { $match: { $expr: { $in: ['$$gwId', '$lastSeenBy'] } } },
-          { $group: { _id: '$claimed', c: { $sum: 1 } } },
+          {
+            // Keep only sensors whose lastSeenBy array contains this gatewayID
+            $match: {
+              $expr: { $in: ['$$gwId', '$lastSeenBy'] },
+            },
+          },
+          // Group by claimed=true/false and count them
+          {
+            $group: {
+              _id: '$claimed',
+              c: { $sum: 1 },
+            },
+          },
         ],
         as: 'sensorCounts',
       },
     };
 
-    /* one branch = paginated rows with counts
-       other branch = totalCount */
-    const pipe: PipelineStage[] = [
-      matchStage,
-      {
-        $facet: {
-          rows: [
-            { $sort: { createdAt: -1 } },
-            { $skip: (page - 1) * limit },
-            { $limit: limit },
-            sensorCountsLookup,
-            {
-              $project: {
-                _id: 1,
-                mac: 1,
-                status: 1,
-                lastSeen: 1,
-                label: 1,
-                createdAt: 1,
-                updatedAt: 1,
-                sensorCounts: 1,
-              },
-            },
-          ],
-          total: [{ $count: 'n' }],
-        },
-      },
-      { $unwind: { path: '$total', preserveNullAndEmptyArrays: true } },
+    // 4. Build the “rows” facet: sort, skip, limit, then append sensorCounts
+    const rowsSubFacet: PipelineStage[] = [
+      { $sort: { createdAt: -1 } },
+      { $skip: (page - 1) * limit },
+      { $limit: limit },
+      sensorCountsLookup,
       {
         $project: {
-          rows: 1,
-          total: { $ifNull: ['$total.n', 0] },
+          _id: 1,
+          mac: 1,
+          status: 1,
+          lastSeen: 1,
+          label: 1,
+          createdAt: 1,
+          updatedAt: 1,
+          sensorCounts: 1,
         },
       },
     ];
 
-    const [{ rows, total }] = await this.gwModel.aggregate(pipe).exec();
+    // 5. Build the full aggregation pipeline
+    const pipeline: PipelineStage[] = [];
 
-    return { rows, total };
+    // a) always match on orgId first
+    pipeline.push(baseMatch);
+
+    // b) if searchStage is not null, push it
+    if (searchStage) {
+      pipeline.push(searchStage);
+    }
+
+    // c) now facet into `rows` and `total`
+    pipeline.push({
+      $facet: {
+        rows: rowsSubFacet as PipelineStage.FacetPipelineStage[],
+        total: [{ $count: 'n' }] as PipelineStage.FacetPipelineStage[],
+      },
+    });
+
+    // d) unwind total count (so total = 0 if none)
+    pipeline.push({
+      $unwind: {
+        path: '$total',
+        preserveNullAndEmptyArrays: true,
+      },
+    });
+
+    // e) project out the final shape: { rows: [...], total: <number> }
+    pipeline.push({
+      $project: {
+        rows: 1,
+        total: { $ifNull: ['$total.n', 0] },
+      },
+    });
+
+    // 6. Run the aggregation
+    const [result] = await this.gwModel.aggregate(pipeline).exec();
+    // result.rows = [ ... gateway docs + sensorCounts ... ]
+    // result.total = <integer>
+
+    return {
+      rows: result.rows,
+      total: result.total,
+    };
   }
 
   async getDetails(gwId: string, orgId: string) {

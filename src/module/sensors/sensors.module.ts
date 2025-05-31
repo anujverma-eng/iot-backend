@@ -7,6 +7,7 @@ import { Gateway, GatewaySchema } from '../gateways/gateways.schema';
 import { UsersService } from '../users/users.service';
 import { User, UserSchema } from '../users/users.schema';
 import { Organization, OrganizationSchema } from '../organizations/organizations.schema';
+import { Telemetry, TelemetrySchema } from '../telemetry/telemetry.schema';
 
 @Module({
   imports: [
@@ -16,6 +17,7 @@ import { Organization, OrganizationSchema } from '../organizations/organizations
         { name: Gateway.name, schema: GatewaySchema },
         { name: User.name, schema: UserSchema },
         { name: Organization.name, schema: OrganizationSchema },
+        { name: Telemetry.name, schema: TelemetrySchema },
       ]
     ),
   ],

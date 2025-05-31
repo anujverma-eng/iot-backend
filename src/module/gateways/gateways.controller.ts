@@ -48,7 +48,7 @@ export class GatewaysController {
   @Get()
   async listMine(
     @Req() req: any,
-    @Query() q: { page?: string; limit?: string },
+    @Query() q: { page?: string; limit?: string, search?: string },
   ) {
     const page = normPage(q);
     const limit = normLimit(q);
@@ -56,6 +56,7 @@ export class GatewaysController {
     const { rows, total } = await this.gwSvc.listForOrg(req.user.orgId, {
       page,
       limit,
+      search: q.search,
     });
 
     return {
