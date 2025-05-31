@@ -12,9 +12,19 @@ async function bootstrap() {
     bufferLogs: true,
   });
 
+  // app.enableCors({
+  //   origin: [
+  //     'http://localhost:5173',
+  //     'http://localhost:3000',
+  //     'http://iot-motionics-platform-frontend.s3-website-us-east-1.amazonaws.com',
+  //     'http://iot-backend-alb-1218459569.us-east-1.elb.amazonaws.com',
+  //   ],
+  //   credentials: true,
+  // });
+
   app.enableCors({
-    origin: ["http://localhost:5173","http://localhost:3000"],
-    credentials: true,
+    origin: '*',
+    credentials: true, // this is ignored if origin="*"
   });
 
   const logger: LoggerService = app.get(LoggerService);
@@ -24,7 +34,7 @@ async function bootstrap() {
     new ResponseInterceptor(),
   );
 
-  app.useGlobalFilters(new GlobalExceptionFilter(logger)); 
+  app.useGlobalFilters(new GlobalExceptionFilter(logger));
   app.useGlobalPipes(new ValidationPipe({ whitelist: true, transform: true }));
 
   const cfg = app.get(ConfigService);
