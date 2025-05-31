@@ -1,28 +1,21 @@
 version: 0.2
 
-env:
-  variables:
-    AWS_DEFAULT_REGION: us-east-1
-    ECR_URI: 199472244724.dkr.ecr.us-east-1.amazonaws.com/iot-backend
-  # needed so Docker can run inside CodeBuild
-  privileged: true
-
 phases:
   pre_build:
     commands:
       - echo Logging in to Amazon ECR...
       - aws ecr get-login-password --region $AWS_DEFAULT_REGION | docker login --username AWS --password-stdin $ECR_URI
+
   build:
     commands:
       - echo Building image...
       - docker build -t iot-backend .
-      - docker tag iot-backend:latest $ECR_URI/iot-backend:1.0.${CODEBUILD_RESOLVED_SOURCE_VERSION:0:7}
+      - SHORT_SHA=$(echo $CODEBUILD_RESOLVED_SOURCE_VERSION | cut -c1-7)
+      - docker tag iot-backend:latest $ECR_URI/iot-backend:1.0.$SHORT_SHA
+
   post_build:
     commands:
       - echo Pushing image...
-      - docker push $ECR_URI/iot-backend:1.0.${CODEBUILD_RESOLVED_SOURCE_VERSION:0:7}
-      - docker tag  $ECR_URI/iot-backend:1.0.${CODEBUILD_RESOLVED_SOURCE_VERSION:0:7}  $ECR_URI/iot-backend:latest
+      - docker push $ECR_URI/iot-backend:1.0.$SHORT_SHA
+      - docker tag $ECR_URI/iot-backend:1.0.$SHORT_SHA $ECR_URI/iot-backend:latest
       - docker push $ECR_URI/iot-backend:latest
-
-
-artifacts: { files: [] }   # nothing to export; images live in ECR

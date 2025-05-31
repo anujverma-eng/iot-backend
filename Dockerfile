@@ -1,16 +1,22 @@
-# ─── 1- Build stage ─────────────────────────────────────────
-FROM node:20-alpine AS builder
+# ─── 1- Builder stage ─────────────────────────────────────
+FROM node:20-slim AS builder
+
 WORKDIR /app
 COPY package*.json ./
-RUN npm ci --omit=dev         # installs prod deps only
-COPY . .
-RUN npm run build             # creates dist/
 
-# ─── 2- Runtime stage (tiny) ────────────────────────────────
-FROM node:20-alpine
-ENV NODE_ENV=production
+# install ALL deps so nest-cli exists
+RUN npm ci
+
+COPY . .
+RUN npm run build        # generates /app/dist
+RUN npm prune --omit=dev # strip dev-deps AFTER the build
+
+# ─── 2- Runtime stage ─────────────────────────────────────
+FROM gcr.io/distroless/nodejs20-debian11
+
 WORKDIR /app
 COPY --from=builder /app/node_modules ./node_modules
 COPY --from=builder /app/dist ./dist
+
 EXPOSE 3000
-CMD ["node", "dist/main.js"]
+CMD ["dist/main.js"]
