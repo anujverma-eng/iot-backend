@@ -11,6 +11,7 @@ import { PlansService } from './plans.service';
 import { CreatePlanDto, UpdatePlanDto } from './dto/plan.dto';
 import { Roles } from '../auth/roles.decorator';
 import { UserRole } from '../users/enums/users.enum';
+import { Public } from '../auth/public.decorator';
 
 @Controller('plans')
 export class PlansController {
@@ -22,11 +23,13 @@ export class PlansController {
     return this.plansService.create(dto);
   }
 
+  @Public()
   @Get()
   findAll() {
     return this.plansService.findAll();
   }
-
+  
+  @Public()
   @Get(':id')
   findOne(@Param('id') id: string) {
     return this.plansService.findById(id);

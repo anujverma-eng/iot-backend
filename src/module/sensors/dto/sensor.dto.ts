@@ -1,25 +1,26 @@
 import {
   IsBoolean,
   IsEnum,
+  IsMACAddress,
   IsMongoId,
   IsOptional,
   IsString,
+  Matches,
 } from 'class-validator';
 import { SensorType } from '../enums/sensor.enum';
 import { Expose, Transform } from 'class-transformer';
 
 export class CreateSensorDto {
+  /** MAC becomes the Mongo _id */
   @IsString()
-  _id: string; // gatewayId#sensorMac composite id
+  _id: string;
 
   @IsString()
   mac: string;
 
-  @IsString()
-  gatewayId: string;
-
   @IsMongoId()
-  orgId: string;
+  @IsOptional()
+  orgId?: string;
 
   @IsOptional()
   @IsEnum(SensorType)
@@ -62,7 +63,7 @@ export class SensorResponseDto {
 
   @Expose()
   displayName?: string;
-  
+
   @Expose()
   lastValue?: number;
 
@@ -70,7 +71,13 @@ export class SensorResponseDto {
   lastUnit?: string;
 
   @Expose()
+  lastSeenBy?: string[];
+
+  @Expose()
   lastSeen?: Date;
+
+  @Expose()
+  claimed: boolean;
 
   @Expose()
   ignored: boolean;
@@ -82,4 +89,18 @@ export class SensorResponseDto {
   createdAt?: never;
   @Transform(() => undefined, { toPlainOnly: true })
   updatedAt?: never;
+}
+
+/** Body payload for POST /sensors/claim */
+export class ClaimSensorDto {
+  /** Printed on the probe label */
+  @Matches(/^([0-9A-F]{2}:){3,5}[0-9A-F]{2}$/i, {
+    message: 'mac must be 4-octet or 6-octet colon-separated hex',
+  })
+  mac!: string;
+
+  /** Optional friendly name that shows up in dashboards */
+  @IsOptional()
+  @IsString()
+  displayName?: string;
 }

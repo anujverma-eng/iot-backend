@@ -25,12 +25,9 @@ export class Gateway {
 
   @Prop({
     enum: GatewayStatus,
-    default: GatewayStatus.UNCLAIMED,
+    default: GatewayStatus.ACTIVE,
   })
   status: GatewayStatus;
-
-  @Prop({ required: true, length: 6, index: true })
-  claimCode: string;
 
   @Prop()
   firmwareVersion?: string;
@@ -58,9 +55,12 @@ export class Gateway {
   /** S3 key inside iot‑cert‑packs bucket */
   @Prop()
   packS3Key?: string;
+
+  @Prop()
+  label?: string;
 }
 
 export const GatewaySchema = SchemaFactory.createForClass(Gateway);
 
 GatewaySchema.index({ orgId: 1 });
-GatewaySchema.index({ claimCode: 1 }, { unique: true });
+GatewaySchema.index({ mac: 'text', label: 'text' });

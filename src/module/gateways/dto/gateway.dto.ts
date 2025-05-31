@@ -29,11 +29,6 @@ export class CreateGatewayDto {
   @IsEnum(GatewayStatus)
   status: GatewayStatus;
 
-  // optional fields
-  @IsOptional()
-  @IsString()
-  claimCode?: string;
-
   @IsOptional()
   @IsString()
   firmwareVersion?: string;
@@ -41,28 +36,15 @@ export class CreateGatewayDto {
 
 export class UpdateGatewayDto extends CreateGatewayDto {}
 
-/** Accepts a printed claim‑ID, which is the gatewayId / ThingName */
-export class ClaimGatewayDto {
-  @IsString()
-  @Matches(/^gw_[A-Za-z0-9]+$/, {
-    message: 'claimId must look like gw_<alphanum>',
-  })
-  claimId!: string;
-
-  @IsString()
-  @Length(6, 6)
-  claimCode!: string;
-}
-
 export class AdminCreateGatewayDto {
   /** Factory‑printed MAC on the sticker */
   @IsMACAddress() mac!: string;
 
   /** Optional human label shown in dashboard before claim */
-  @IsOptional() @IsString()
+  @IsOptional()
+  @IsString()
   label?: string;
 }
-
 
 export class CreateGatewayAdminDto {
   @IsMACAddress() mac!: string;
@@ -74,4 +56,14 @@ export class BulkGatewaysDto {
   @ArrayMaxSize(10)
   @IsMACAddress(undefined, { each: true })
   macs!: string[];
+}
+
+export class RegisterGatewayDto {
+  /** Factory-printed MAC on sticker */
+  @IsMACAddress() mac!: string;
+
+  /** Optional human-friendly label shown in dashboard before first ping */
+  @IsOptional()
+  @IsString()
+  label?: string;
 }

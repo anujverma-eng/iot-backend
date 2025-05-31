@@ -1,6 +1,7 @@
 import {
   Body,
   Controller,
+  Get,
   HttpCode,
   HttpStatus,
   Post,
@@ -12,7 +13,7 @@ import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { RolesGuard } from '../auth/roles.guard';
 import { UsersService } from './users.service';
 import { Roles } from '../auth/roles.decorator';
-import { InviteUserDto } from './dto/user.dto';
+import { InviteUserDto, MeDto } from './dto/user.dto';
 
 @Controller('users')
 @UseGuards(JwtAuthGuard, RolesGuard)
@@ -29,4 +30,11 @@ export class UsersController {
       dto,
     );
   }
+
+  @Get('me')
+  @Roles(UserRole.OWNER, UserRole.ADMIN, UserRole.MEMBER, UserRole.VIEWER)
+  async me(@Req() req: any): Promise<MeDto> {
+    return this.svc.getMe(req.user.sub);   // 👈 single service call
+  }
+  
 }

@@ -6,6 +6,7 @@ import {
   IsString,
 } from 'class-validator';
 import { UserRole, UserStatus } from '../enums/users.enum';
+import { Expose, Transform } from 'class-transformer';
 
 export class CreateUserDto {
   @IsMongoId()
@@ -40,4 +41,18 @@ export class InviteUserDto {
   @IsOptional()
   @IsEnum(UserRole)
   role: UserRole = UserRole.MEMBER;
+}
+
+export class MeDto {
+  @Expose() _id: string;
+  @Expose() email: string;
+  @Expose() role: string;
+  @Expose() orgId?: string | null;
+
+  @Transform(() => undefined, { toPlainOnly: true })
+  __v?: never;
+  @Transform(() => undefined, { toPlainOnly: true })
+  createdAt?: never;
+  @Transform(() => undefined, { toPlainOnly: true })
+  updatedAt?: never;
 }

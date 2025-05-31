@@ -66,6 +66,9 @@ export class OrganizationsService {
       return org[0];
     } catch (err) {
       await session.abortTransaction();
+      if (err.code === 11000) {
+        throw new BadRequestException('Organization name already exists');
+      }
       throw err;
     } finally {
       session.endSession();

@@ -7,21 +7,23 @@ export type SensorDocument = Sensor & Document;
 @Schema({ collection: 'sensors', timestamps: true, _id: false })
 export class Sensor {
   @Prop({ _id: true, type: String })
-  _id: string; // gatewayId#sensorMac
+  _id: string; // sensor MAC (PK)
 
   @Prop({ required: true, index: true })
   mac: string;
 
-  @Prop({ required: true })
-  gatewayId: string;
-
+  /** Set only when user claims it */
   @Prop({
     type: Types.ObjectId,
     ref: 'Organization',
-    required: true,
+    default: null,
     index: true,
   })
-  orgId: Types.ObjectId;
+  orgId: Types.ObjectId | null;
+
+  /** True once the probe is claimed (derived flag) */
+  @Prop({ default: false })
+  claimed: boolean;
 
   @Prop({ enum: SensorType })
   type?: SensorType;
@@ -38,11 +40,17 @@ export class Sensor {
 
   @Prop() lastSeen?: Date;
 
+  @Prop({
+    type: [String], // gwId list
+    default: [],
+  })
+  lastSeenBy: string[];
+
   @Prop({ default: false })
   ignored: boolean;
 }
 
 export const SensorSchema = SchemaFactory.createForClass(Sensor);
 
-// quick look‑up before composing _id
-SensorSchema.index({ gatewayId: 1, mac: 1 }, { unique: true });
+SensorSchema.index({ mac: 1 }, { unique: true });
+SensorSchema.index({ mac: 'text', displayName: 'text' });

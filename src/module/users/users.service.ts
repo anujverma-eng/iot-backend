@@ -2,12 +2,13 @@ import {
   BadRequestException,
   ConflictException,
   Injectable,
+  NotFoundException,
 } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
 import { User, UserDocument } from './users.schema';
 import { UserRole, UserStatus } from './enums/users.enum';
-import { InviteUserDto } from './dto/user.dto';
+import { InviteUserDto, MeDto } from './dto/user.dto';
 import {
   Organization,
   OrganizationDocument,
@@ -17,6 +18,7 @@ import {
   CognitoIdentityProviderClient,
 } from '@aws-sdk/client-cognito-identity-provider';
 import { ConfigService } from '@nestjs/config';
+import { plainToInstance } from 'class-transformer';
 
 @Injectable()
 export class UsersService {
@@ -134,5 +136,16 @@ export class UsersService {
     }
 
     return invited.toObject();
+  }
+
+  async getMe(sub: string): Promise<MeDto> {
+    const user = await this.userModel
+      .findOne({ cognitoSub: sub })
+      .select('-__v -createdAt -updatedAt')
+      .lean();
+
+    if (!user) throw new NotFoundException('User not found');
+
+    return plainToInstance(MeDto, user, { excludeExtraneousValues: true });
   }
 }

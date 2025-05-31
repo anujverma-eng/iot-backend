@@ -11,6 +11,7 @@ import { CertsService } from '../certs/certs.service';
 import { S3Service } from 'src/common/aws/s3.service';
 import { UsersService } from '../users/users.service';
 import { User, UserSchema } from '../users/users.schema';
+import { Sensor, SensorSchema } from '../sensors/sensors.schema';
 
 @Module({
   imports: [
@@ -18,6 +19,7 @@ import { User, UserSchema } from '../users/users.schema';
       { name: Gateway.name, schema: GatewaySchema },
       { name: Organization.name, schema: OrganizationSchema },
       { name: User.name, schema: UserSchema },
+      { name: Sensor.name, schema: SensorSchema },
     ]),
   ],
   controllers: [GatewaysController],

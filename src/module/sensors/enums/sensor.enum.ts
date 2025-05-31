@@ -3,5 +3,10 @@ export enum SensorType {
   HUMIDITY = 'humidity',
   PRESSURE = 'pressure',
   ACCEL    = 'accelerometer',
-  // extend as new types appear
+  CO2      = 'co2',
+  LIGHT    = 'light',
+  MOTION   = 'motion',
+  UNKNOWN  = 'unknown',
+  GENERIC  = 'generic',
+  BATTERY  = 'battery',
 }

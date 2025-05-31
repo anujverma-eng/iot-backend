@@ -6,7 +6,7 @@ import { Public } from '../auth/public.decorator';
 export class HealthController {
   constructor(private readonly logger: LoggerService) {}
 
-  @Public()
+  // @Public()
   @Get()
   getHealth(): { status: string } {
     this.logger.debug('Health check ping', HealthController.name);

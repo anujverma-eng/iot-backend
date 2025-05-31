@@ -12,6 +12,9 @@ export class Telemetry {
   @Prop({ required: true, type: String, index: true })
   sensorId: string; // gw#mac
 
+  @Prop({ required: false, type: String })
+  name: string; // gw#mac
+
   @Prop({ required: true })
   value: number;
 }
