@@ -29,7 +29,7 @@ async function bootstrap() {
 
   const cfg = app.get(ConfigService);
   const port = cfg.get<number>('port', { infer: true }) ?? 3000;
-  await app.listen(port);
+  await app.listen(3000, '0.0.0.0');
   logger.log(`🚀  Listening on http://localhost:${port}`, 'Bootstrap');
 }
 
