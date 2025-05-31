@@ -12,17 +12,17 @@ phases:
     commands:
       - echo Logging in to Amazon ECR...
       - aws ecr get-login-password --region $AWS_DEFAULT_REGION | docker login --username AWS --password-stdin $ECR_URI
-
   build:
     commands:
-      - echo "Building NestJS image $IMAGE_TAG"
-      - docker build -t iot-backend:$IMAGE_TAG .
-      - docker tag iot-backend:$IMAGE_TAG $ECR_URI:$IMAGE_TAG
-      - docker tag iot-backend:$IMAGE_TAG $ECR_URI:latest
+      - echo Building image...
+      - docker build -t iot-backend .
+      - docker tag iot-backend:latest $ECR_URI/iot-backend:1.0.${CODEBUILD_RESOLVED_SOURCE_VERSION:0:7}
   post_build:
     commands:
-      - echo "Pushing images to ECR"
-      - docker push $ECR_URI:$IMAGE_TAG
-      - docker push $ECR_URI:latest
+      - echo Pushing image...
+      - docker push $ECR_URI/iot-backend:1.0.${CODEBUILD_RESOLVED_SOURCE_VERSION:0:7}
+      - docker tag  $ECR_URI/iot-backend:1.0.${CODEBUILD_RESOLVED_SOURCE_VERSION:0:7}  $ECR_URI/iot-backend:latest
+      - docker push $ECR_URI/iot-backend:latest
+
 
 artifacts: { files: [] }   # nothing to export; images live in ECR
