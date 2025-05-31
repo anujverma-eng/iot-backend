@@ -10,10 +10,9 @@ env:
 phases:
   pre_build:
     commands:
-      - echo "Logging in to ECR"
-      - aws ecr get-login-password --region $AWS_DEFAULT_REGION \
-        | docker login --username AWS --password-stdin $ECR_URI
-      - IMAGE_TAG=$(date +%Y%m%d%H%M%S)          # e.g. 20250525093010
+      - echo Logging in to Amazon ECR...
+      - aws ecr get-login-password --region $AWS_DEFAULT_REGION | docker login --username AWS --password-stdin $ECR_URI
+
   build:
     commands:
       - echo "Building NestJS image $IMAGE_TAG"
