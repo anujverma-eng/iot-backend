@@ -60,7 +60,7 @@ export class UsersService {
       orgId: null,
       email: token.email,
       cognitoSub: token.sub,
-      role: UserRole.VIEWER,
+      role: UserRole.OWNER,
       status: UserStatus.ACTIVE,
     });
     return created.toObject();
