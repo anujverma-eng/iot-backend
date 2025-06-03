@@ -3,6 +3,8 @@ import {
   IoTClient,
   CreateKeysAndCertificateCommand,
   CreateThingCommand,
+  AttachThingPrincipalCommand,
+  AttachPolicyCommand,
 } from '@aws-sdk/client-iot';
 import { randomUUID } from 'node:crypto';
 import * as JSZip from 'jszip';
@@ -18,6 +20,7 @@ const AMAZON_ROOT_CA_1 = `-----BEGIN CERTIFICATE-----
 @Injectable()
 export class CertsService {
   private readonly iot: IoTClient;
+  private readonly tenantPolicy = "GatewayTenantPolicy";   
 
   constructor(
     private readonly s3Svc: S3Service,
@@ -28,7 +31,7 @@ export class CertsService {
 
   /** Factory flow: Thing → certs → ZIP upload → presigned URL */
   async provisionGateway(thingName: string, mac: string) {
-    /* 1️⃣ Thing */
+    // 1) Create the Thing
     await this.iot.send(
       new CreateThingCommand({
         thingName,
@@ -36,9 +39,25 @@ export class CertsService {
       }),
     );
 
-    /* 2️⃣ Cert / key */
+    // 2) Create a key + cert and mark it Active
     const cert = await this.iot.send(
       new CreateKeysAndCertificateCommand({ setAsActive: true }),
+    );
+
+    // 2a) Attach that cert to the Thing
+    await this.iot.send(
+      new AttachThingPrincipalCommand({
+        thingName,
+        principal: cert.certificateArn!,
+      }),
+    );
+
+    // 2b) Attach your tenant policy to the cert
+    await this.iot.send(
+      new AttachPolicyCommand({
+        policyName: this.tenantPolicy,
+        target: cert.certificateArn!,
+      }),
     );
 
     /* 3️⃣ Build ZIP buffer */
