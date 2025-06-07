@@ -11,11 +11,12 @@ import { ConfigService } from '@nestjs/config';
 export class CognitoIdentityService {
   private readonly idp: CognitoIdentityClient;
   private readonly idPoolId: string;
-  private readonly cfg: ConfigService
+  private readonly cfg: ConfigService;
 
   constructor(cfg: ConfigService) {
-    this.idp       = new CognitoIdentityClient({ region: cfg.get('aws.region') });
-    this.idPoolId  = cfg.get<string>('cognito.identityPoolId')!;
+    this.cfg      = cfg;
+    this.idp      = new CognitoIdentityClient({ region: this.cfg.get('aws.region') });
+    this.idPoolId = this.cfg.get<string>('cognito.identityPoolId')!;
   }
 
   /** Exchange ID‑token for short‑lived AWS creds */
