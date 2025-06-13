@@ -82,11 +82,13 @@ export class SensorResponseDto {
   @Expose()
   ignored: boolean;
 
+  @Expose()
+  createdAt: Date;
+
   /** strip Mongo internals */
   @Transform(() => undefined, { toPlainOnly: true })
   __v?: never;
-  @Transform(() => undefined, { toPlainOnly: true })
-  createdAt?: never;
+
   @Transform(() => undefined, { toPlainOnly: true })
   updatedAt?: never;
 }

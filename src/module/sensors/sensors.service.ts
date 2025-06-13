@@ -10,6 +10,7 @@ import {
 import { UserRole } from '../users/enums/users.enum';
 import { ClaimSensorDto } from './dto/sensor.dto';
 import { Telemetry } from '../telemetry/telemetry.schema';
+import { SensorType } from './enums/sensor.enum';
 
 @Injectable()
 export class SensorsService {
@@ -71,9 +72,10 @@ export class SensorsService {
       search?: string;
       sort?: string;
       dir?: 'asc' | 'desc';
+      type?: SensorType;
     },
   ) {
-    const { page, limit, claimed, search, sort, dir } = opts;
+    const { page, limit, claimed, search, sort, dir, type } = opts;
 
     // 1. find all gateway IDs for this org
     const gateways = await this.gwModel.find({ orgId }, { _id: 1 }).lean();
@@ -84,6 +86,7 @@ export class SensorsService {
       ignored: { $ne: true },
       lastSeenBy: { $in: gatewayIds },
       $or: [{ orgId }, { orgId: null }],
+      ...(type && { type }),
     };
 
     // 3. filter by claimed if provided
@@ -224,10 +227,19 @@ export class SensorsService {
 
   /** mini stats */
   async getStats(orgId: Types.ObjectId) {
-    const [claimed, unclaimed] = await Promise.all([
-      this.sensorModel.countDocuments({ orgId, claimed: true }),
-      this.sensorModel.countDocuments({ orgId: null, ignored: { $ne: true } }),
-    ]);
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const [claimed, unclaimed, liveSensors, offlineSensors] = await Promise.all(
+      [
+        this.sensorModel.countDocuments({ orgId, claimed: true }),
+        this.sensorModel.countDocuments({
+          orgId: null,
+          ignored: { $ne: true },
+        }),
+        this.sensorModel.countDocuments({ orgId, lastSeen: { $gte: today } }),
+        this.sensorModel.countDocuments({ orgId, lastSeen: { $lt: today } }),
+      ],
+    );
 
     // crude avg seconds between points (could be refined)
     const avgFreq = await this.sensorModel.aggregate([
@@ -238,6 +250,8 @@ export class SensorsService {
     return {
       claimed,
       unclaimed,
+      liveSensors,
+      offlineSensors,
       avgReadingFrequency: Math.round(avgFreq?.[0]?.avg ?? 0),
     };
   }

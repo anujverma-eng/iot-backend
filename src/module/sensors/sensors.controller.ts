@@ -18,6 +18,7 @@ import { Public } from '../auth/public.decorator';
 import { Roles } from '../auth/roles.decorator';
 import { UserRole } from '../users/enums/users.enum';
 import { normLimit, normPage } from 'src/common/utils/pagination';
+import { SensorType } from './enums/sensor.enum';
 
 @Controller('sensors')
 @UseGuards(JwtAuthGuard, RolesGuard)
@@ -66,6 +67,7 @@ export class SensorsController {
       q?: string; // search
       sort?: string; // field
       dir?: 'asc' | 'desc';
+      type?: SensorType,
     },
     @Req() req: any,
   ) {
@@ -79,12 +81,14 @@ export class SensorsController {
       search: q.q,
       sort: q.sort,
       dir: q.dir,
+      type: q?.type,
     });
 
     return {
-      data: plainToInstance(SensorResponseDto, rows, {
-        excludeExtraneousValues: true,
-      }),
+      // data: plainToInstance(SensorResponseDto, rows, {
+      //   excludeExtraneousValues: true,
+      // }),
+      data: rows,
       pagination: { total, page, limit, totalPages: Math.ceil(total / limit) },
     };
   }
