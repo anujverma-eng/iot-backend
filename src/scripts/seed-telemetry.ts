@@ -56,8 +56,8 @@ async function bootstrap() {
     getModelToken(Telemetry.name),
   );
 
-  const start = new Date(Date.UTC(2025, 4, 25)); // 25-May-2025 00:00 UTC
-  const days = 3; // until 24-Jun-2025 inclusive
+  const start = new Date(Date.UTC(2025, 5, 2)); // 02-June-2025 00:00 UTC
+  const days = 17; // until 17-Jun-2025 inclusive`
 
   const bulk = TelemetryModel.collection.initializeUnorderedBulkOp();
 

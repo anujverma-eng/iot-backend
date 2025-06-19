@@ -214,12 +214,23 @@ export class SensorsService {
     return s.toObject();
   }
 
+  async addToFavorite(mac: string, orgId: Types.ObjectId) {
+    // if favorite already true, then make it false, else set to true
+    const existing = await this.sensorModel.findOne({ _id: mac, orgId });
+    if (!existing) throw new NotFoundException('Sensor not found in your org');
+    const s = await this.sensorModel.findOneAndUpdate(
+      { _id: mac, orgId },
+      { $set: { favorite: !existing.favorite } },
+    );
+    if (!s) throw new NotFoundException('Sensor not found in your org');
+    return s.toObject();
+  }
+
   /** un-claim -> reset flags & scrub data link */
   async unclaim(mac: string, orgId: Types.ObjectId) {
     const upd = await this.sensorModel.findOneAndUpdate(
       { _id: mac, orgId },
       { $set: { orgId: null, claimed: false } },
-      { new: true },
     );
     if (!upd) throw new NotFoundException('Sensor not found or not yours');
     return upd.toObject();

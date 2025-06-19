@@ -48,6 +48,9 @@ export class Sensor {
 
   @Prop({ default: false })
   ignored: boolean;
+
+  @Prop({ default: false })
+  favorite: boolean;
 }
 
 export const SensorSchema = SchemaFactory.createForClass(Sensor);

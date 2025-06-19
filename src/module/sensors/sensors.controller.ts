@@ -127,6 +127,15 @@ export class SensorsController {
     return this.svc.updateSensor(mac.toUpperCase(), req.user.orgId, dto);
   }
 
+  @Post(':mac/favorite')
+  @Roles(UserRole.OWNER)
+  addToFavorite(
+    @Param('mac') mac: string,
+    @Req() req: any,
+  ) {
+    return this.svc.addToFavorite(mac.toUpperCase(), req.user.orgId);
+  }
+
   /** POST /sensors/:mac/claim   */
   @Post(':mac/claim')
   @Roles(UserRole.OWNER)
