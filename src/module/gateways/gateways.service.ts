@@ -134,12 +134,21 @@ export class GatewaysService {
     const sensorCountsLookup: PipelineStage.Lookup = {
       $lookup: {
         from: 'sensors',
-        let: { gwId: '$_id' },
+        let: { gwId: '$_id', currentOrgId: new Types.ObjectId(orgId) },
         pipeline: [
           {
-            // Keep only sensors whose lastSeenBy array contains this gatewayID
             $match: {
-              $expr: { $in: ['$$gwId', '$lastSeenBy'] },
+              $expr: {
+                $and: [
+                  { $in: ['$$gwId', '$lastSeenBy'] },
+                  {
+                    $or: [
+                      { $eq: ['$orgId', '$$currentOrgId'] }, // claimed sensors belonging to this org
+                      { $eq: ['$orgId', null] }, // unclaimed sensors
+                    ],
+                  },
+                ],
+              },
             },
           },
           // Group by claimed=true/false and count them
@@ -221,8 +230,14 @@ export class GatewaysService {
   }
 
   async getDetails(gwId: string, orgId: string) {
+    const params: Record<string, any> = { _id: gwId, orgId };
+    // If gwId is ObjectId, change the params to match objectid
+    if (Types.ObjectId.isValid(gwId)) {
+      params._id = new Types.ObjectId(gwId);
+    }
+
     const gw = await this.gwModel
-      .findOne({ _id: gwId, orgId })
+      .findOne(params)
       .select(
         '_id mac status claimCode lastSeen createdAt updatedAt orgId label',
       )
@@ -230,7 +245,15 @@ export class GatewaysService {
     if (!gw) throw new NotFoundException('Gateway not found in your org');
 
     const sensorCounts = await this.sensorModel.aggregate([
-      { $match: { lastSeenBy: gwId } },
+      {
+        $match: {
+          lastSeenBy: gwId,
+          $or: [
+            { orgId: new Types.ObjectId(orgId) }, // claimed sensors belonging to this org
+            { orgId: null }, // unclaimed sensors
+          ],
+        },
+      },
       {
         $group: {
           _id: '$claimed',
@@ -341,58 +364,74 @@ export class GatewaysService {
     try {
       // 1. Remove this gateway from sensors' lastSeenBy arrays
       await this.sensorModel.updateMany(
-        { lastSeenBy: gwId },
-        { $pull: { lastSeenBy: gwId } }
+        { lastSeenBy: gwId, orgId: orgId },
+        {
+          $pull: { lastSeenBy: gwId },
+          orgId: null,
+          favorite: false,
+          displayName: '',
+          claimed: false,
+        },
       );
 
       // 2. Clean up telemetry data for sensors that were only seen by this gateway
       // Find sensors that were ONLY seen by this gateway and remove their telemetry
-      const orphanedSensors = await this.sensorModel.find({
-        lastSeenBy: { $size: 0 }, // After removing gwId, lastSeenBy is empty
-        orgId: null, // Unclaimed sensors
-      }).select('_id').lean();
+      const orphanedSensors = await this.sensorModel
+        .find({
+          lastSeenBy: { $size: 0 }, // After removing gwId, lastSeenBy is empty
+          orgId: null, // Unclaimed sensors
+        })
+        .select('_id')
+        .lean();
 
       if (orphanedSensors.length > 0) {
-        const orphanedSensorIds = orphanedSensors.map(s => s._id);
+        const orphanedSensorIds = orphanedSensors.map((s) => s._id);
         await this.telemetryModel.deleteMany({
-          sensorId: { $in: orphanedSensorIds }
+          sensorId: { $in: orphanedSensorIds },
         });
       }
 
       // 3. Delete the gateway from database first
       await this.gwModel.deleteOne({ _id: gwId, orgId });
+      // await this.gwModel.updateOne(
+      //   { _id: gwId, orgId },
+      //   { $set: { orgId: new Types.ObjectId('68282f0d90804acdfb54738d') } },
+      // );
 
       // 4. Clean up AWS IoT certificates, thing, and S3 resources in background
       this.cleanupGatewayResourcesInBackground(
         gateway._id, // thingName
         gateway.certId,
-        gateway.packS3Key
+        gateway.packS3Key,
       );
 
-      return { 
+      return {
         message: 'Gateway deleted successfully',
         deletedGatewayId: gwId,
         cleanedUp: {
           sensors: `Updated sensors by removing gateway reference`,
-          telemetry: `Removed telemetry for ${orphanedSensors.length} orphaned sensors`,
+          // telemetry: `Removed telemetry for ${orphanedSensors.length} orphaned sensors`,
           certificates: 'AWS IoT certificate cleanup initiated in background',
-          s3: gateway.packS3Key ? 'S3 certificate pack cleanup initiated in background' : 'No S3 pack to delete'
-        }
+          s3: gateway.packS3Key
+            ? 'S3 certificate pack cleanup initiated in background'
+            : 'No S3 pack to delete',
+        },
       };
-
     } catch (error) {
       // If cleanup fails, we still want to remove the gateway from our database
       // but we should log the error and inform the user
       console.error(`Error during gateway cleanup for ${gwId}:`, error);
-      
+
       // Still delete the gateway record
       await this.gwModel.deleteOne({ _id: gwId, orgId });
-      
+
       return {
-        message: 'Gateway deleted from database, but some cleanup operations failed',
+        message:
+          'Gateway deleted from database, but some cleanup operations failed',
         deletedGatewayId: gwId,
-        warning: 'Some AWS resources may not have been cleaned up properly. Check logs for details.',
-        error: error.message
+        warning:
+          'Some AWS resources may not have been cleaned up properly. Check logs for details.',
+        error: error.message,
       };
     }
   }
@@ -402,17 +441,21 @@ export class GatewaysService {
    * This runs asynchronously without blocking the API response
    */
   private cleanupGatewayResourcesInBackground(
-    thingName: string, 
-    certId: string, 
-    packS3Key?: string
+    thingName: string,
+    certId: string,
+    packS3Key?: string,
   ): void {
     // Run cleanup asynchronously without awaiting
-    this.certsSvc.cleanupGateway(thingName, certId, packS3Key)
+    this.certsSvc
+      .cleanupGateway(thingName, certId, packS3Key)
       .then(() => {
         console.log(`✅ Background cleanup completed for gateway ${thingName}`);
       })
       .catch((error) => {
-        console.error(`❌ Background cleanup failed for gateway ${thingName}:`, error);
+        console.error(
+          `❌ Background cleanup failed for gateway ${thingName}:`,
+          error,
+        );
         // You could optionally:
         // - Store failed cleanup tasks in a queue for retry
         // - Send notifications to admins
