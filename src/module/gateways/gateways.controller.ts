@@ -1,6 +1,7 @@
 import {
   Body,
   Controller,
+  Delete,
   Get,
   Param,
   Patch,
@@ -135,5 +136,14 @@ export class GatewaysController {
     @Req() req: any,
   ) {
     return this.gwSvc.attachSensors(id, req.user.orgId, macs);
+  }
+
+  @Delete(':id')
+  @Roles(UserRole.OWNER)
+  async deleteGateway(
+    @Param('id') id: string,
+    @Req() req: any,
+  ) {
+    return this.gwSvc.deleteGateway(id, req.user.orgId);
   }
 }

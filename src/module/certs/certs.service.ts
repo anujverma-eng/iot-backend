@@ -5,6 +5,12 @@ import {
   CreateThingCommand,
   AttachThingPrincipalCommand,
   AttachPolicyCommand,
+  DetachThingPrincipalCommand,
+  DetachPolicyCommand,
+  UpdateCertificateCommand,
+  DeleteCertificateCommand,
+  DeleteThingCommand,
+  CertificateStatus,
 } from '@aws-sdk/client-iot';
 import { randomUUID } from 'node:crypto';
 import * as JSZip from 'jszip';
@@ -95,5 +101,84 @@ export class CertsService {
     await this.s3Svc.putObject(zipKey, newBuf, {
       ContentType: 'application/zip',
     });
+  }
+
+  /** Cleanup gateway resources: certificates, thing, and S3 files */
+  async cleanupGateway(thingName: string, certId: string, packS3Key?: string) {
+    try {
+      // 1. Get certificate ARN (needed for detaching)
+      const certArn = `arn:aws:iot:${process.env.AWS_REGION || 'us-east-1'}:${process.env.AWS_ACCOUNT_ID}:cert/${certId}`;
+
+      // 2. Detach policy from certificate
+      try {
+        await this.iot.send(
+          new DetachPolicyCommand({
+            policyName: this.tenantPolicy,
+            target: certArn,
+          }),
+        );
+      } catch (error) {
+        console.warn(`Failed to detach policy from cert ${certId}:`, error);
+      }
+
+      // 3. Detach certificate from thing
+      try {
+        await this.iot.send(
+          new DetachThingPrincipalCommand({
+            thingName,
+            principal: certArn,
+          }),
+        );
+      } catch (error) {
+        console.warn(`Failed to detach cert from thing ${thingName}:`, error);
+      }
+
+      // 4. Deactivate certificate
+      try {
+        await this.iot.send(
+          new UpdateCertificateCommand({
+            certificateId: certId,
+            newStatus: CertificateStatus.INACTIVE,
+          }),
+        );
+      } catch (error) {
+        console.warn(`Failed to deactivate cert ${certId}:`, error);
+      }
+
+      // 5. Delete certificate
+      try {
+        await this.iot.send(
+          new DeleteCertificateCommand({
+            certificateId: certId,
+          }),
+        );
+      } catch (error) {
+        console.warn(`Failed to delete cert ${certId}:`, error);
+      }
+
+      // 6. Delete thing
+      try {
+        await this.iot.send(
+          new DeleteThingCommand({
+            thingName,
+          }),
+        );
+      } catch (error) {
+        console.warn(`Failed to delete thing ${thingName}:`, error);
+      }
+
+      // 7. Delete S3 certificate pack
+      if (packS3Key) {
+        try {
+          await this.s3Svc.deleteObject(packS3Key);
+        } catch (error) {
+          console.warn(`Failed to delete S3 object ${packS3Key}:`, error);
+        }
+      }
+
+    } catch (error) {
+      console.error(`Error during gateway cleanup for ${thingName}:`, error);
+      throw error;
+    }
   }
 }

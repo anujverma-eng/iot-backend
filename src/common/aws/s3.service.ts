@@ -2,6 +2,7 @@ import {
   S3Client,
   PutObjectCommand,
   GetObjectCommand,
+  DeleteObjectCommand,
   PutObjectCommandInput,
 } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
@@ -66,5 +67,15 @@ export class S3Service {
     const chunks: Uint8Array[] = [];
     for await (const chunk of stream) chunks.push(chunk);
     return Buffer.concat(chunks);
+  }
+
+  /** Delete an object from S3 */
+  async deleteObject(key: string): Promise<void> {
+    await this.s3.send(
+      new DeleteObjectCommand({
+        Bucket: this.bucket,
+        Key: key,
+      }),
+    );
   }
 }

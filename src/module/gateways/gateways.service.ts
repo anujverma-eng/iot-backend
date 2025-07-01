@@ -16,6 +16,7 @@ import {
 import { GatewayStatus } from './enums/gateway.enum';
 import { CertsService } from '../certs/certs.service';
 import { Sensor, SensorDocument } from '../sensors/sensors.schema';
+import { Telemetry, TelemetryDocument } from '../telemetry/telemetry.schema';
 
 @Injectable()
 export class GatewaysService {
@@ -26,6 +27,8 @@ export class GatewaysService {
     private readonly orgModel: Model<OrganizationDocument>,
     @InjectModel(Sensor.name)
     private readonly sensorModel: Model<SensorDocument>,
+    @InjectModel(Telemetry.name)
+    private readonly telemetryModel: Model<TelemetryDocument>,
     private readonly certsSvc: CertsService,
   ) {}
 
@@ -326,5 +329,94 @@ export class GatewaysService {
       { $addToSet: { lastSeenBy: gwId } },
     );
     return { added: macs.length };
+  }
+
+  async deleteGateway(gwId: string, orgId: string) {
+    // Check if gateway exists and belongs to the organization
+    const gateway = await this.gwModel.findOne({ _id: gwId, orgId });
+    if (!gateway) {
+      throw new NotFoundException('Gateway not found in your organization');
+    }
+
+    try {
+      // 1. Remove this gateway from sensors' lastSeenBy arrays
+      await this.sensorModel.updateMany(
+        { lastSeenBy: gwId },
+        { $pull: { lastSeenBy: gwId } }
+      );
+
+      // 2. Clean up telemetry data for sensors that were only seen by this gateway
+      // Find sensors that were ONLY seen by this gateway and remove their telemetry
+      const orphanedSensors = await this.sensorModel.find({
+        lastSeenBy: { $size: 0 }, // After removing gwId, lastSeenBy is empty
+        orgId: null, // Unclaimed sensors
+      }).select('_id').lean();
+
+      if (orphanedSensors.length > 0) {
+        const orphanedSensorIds = orphanedSensors.map(s => s._id);
+        await this.telemetryModel.deleteMany({
+          sensorId: { $in: orphanedSensorIds }
+        });
+      }
+
+      // 3. Delete the gateway from database first
+      await this.gwModel.deleteOne({ _id: gwId, orgId });
+
+      // 4. Clean up AWS IoT certificates, thing, and S3 resources in background
+      this.cleanupGatewayResourcesInBackground(
+        gateway._id, // thingName
+        gateway.certId,
+        gateway.packS3Key
+      );
+
+      return { 
+        message: 'Gateway deleted successfully',
+        deletedGatewayId: gwId,
+        cleanedUp: {
+          sensors: `Updated sensors by removing gateway reference`,
+          telemetry: `Removed telemetry for ${orphanedSensors.length} orphaned sensors`,
+          certificates: 'AWS IoT certificate cleanup initiated in background',
+          s3: gateway.packS3Key ? 'S3 certificate pack cleanup initiated in background' : 'No S3 pack to delete'
+        }
+      };
+
+    } catch (error) {
+      // If cleanup fails, we still want to remove the gateway from our database
+      // but we should log the error and inform the user
+      console.error(`Error during gateway cleanup for ${gwId}:`, error);
+      
+      // Still delete the gateway record
+      await this.gwModel.deleteOne({ _id: gwId, orgId });
+      
+      return {
+        message: 'Gateway deleted from database, but some cleanup operations failed',
+        deletedGatewayId: gwId,
+        warning: 'Some AWS resources may not have been cleaned up properly. Check logs for details.',
+        error: error.message
+      };
+    }
+  }
+
+  /**
+   * Background cleanup method for AWS resources
+   * This runs asynchronously without blocking the API response
+   */
+  private cleanupGatewayResourcesInBackground(
+    thingName: string, 
+    certId: string, 
+    packS3Key?: string
+  ): void {
+    // Run cleanup asynchronously without awaiting
+    this.certsSvc.cleanupGateway(thingName, certId, packS3Key)
+      .then(() => {
+        console.log(`✅ Background cleanup completed for gateway ${thingName}`);
+      })
+      .catch((error) => {
+        console.error(`❌ Background cleanup failed for gateway ${thingName}:`, error);
+        // You could optionally:
+        // - Store failed cleanup tasks in a queue for retry
+        // - Send notifications to admins
+        // - Log to monitoring service
+      });
   }
 }
