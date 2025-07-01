@@ -1,23 +1,23 @@
-import { Injectable } from '@nestjs/common';
 import {
-  IoTClient,
+  AttachPolicyCommand,
+  AttachThingPrincipalCommand,
+  CertificateStatus,
   CreateKeysAndCertificateCommand,
   CreateThingCommand,
-  AttachThingPrincipalCommand,
-  AttachPolicyCommand,
-  DetachThingPrincipalCommand,
-  DetachPolicyCommand,
-  UpdateCertificateCommand,
   DeleteCertificateCommand,
   DeleteThingCommand,
-  CertificateStatus,
+  DetachPolicyCommand,
+  DetachThingPrincipalCommand,
+  IoTClient,
+  ListThingPrincipalsCommand,
+  UpdateCertificateCommand
 } from '@aws-sdk/client-iot';
-import { randomUUID } from 'node:crypto';
+import { Injectable } from '@nestjs/common';
 import * as JSZip from 'jszip';
 import { DateTime } from 'luxon';
 
-import { S3Service } from '../../common/aws/s3.service';
 import { ConfigService } from '@nestjs/config';
+import { S3Service } from '../../common/aws/s3.service';
 
 const AMAZON_ROOT_CA_1 = `-----BEGIN CERTIFICATE-----
 <… full Amazon Root CA (cut for brevity) …>
@@ -105,80 +105,128 @@ export class CertsService {
 
   /** Cleanup gateway resources: certificates, thing, and S3 files */
   async cleanupGateway(thingName: string, certId: string, packS3Key?: string) {
+    console.log(`🧹 Starting cleanup for gateway ${thingName} with cert ${certId}`);
+    
     try {
-      // 1. Get certificate ARN (needed for detaching)
-      const certArn = `arn:aws:iot:${process.env.AWS_REGION || 'us-east-1'}:${process.env.AWS_ACCOUNT_ID}:cert/${certId}`;
-
-      // 2. Detach policy from certificate
+      // 1. First, get all principals attached to the thing to find the correct ARN
+      let certArn: string | undefined;
+      
       try {
-        await this.iot.send(
-          new DetachPolicyCommand({
-            policyName: this.tenantPolicy,
-            target: certArn,
-          }),
+        const principals = await this.iot.send(
+          new ListThingPrincipalsCommand({ thingName })
         );
+        
+        // Find the certificate ARN that matches our certId
+        certArn = principals.principals?.find(arn => arn.includes(certId));
+        
+        if (!certArn) {
+          console.warn(`Certificate ARN not found for certId ${certId} on thing ${thingName}`);
+          // Try to construct the ARN anyway
+          const region = process.env.AWS_REGION || 'us-east-1';
+          const accountId = process.env.AWS_ACCOUNT_ID;
+          if (accountId) {
+            certArn = `arn:aws:iot:${region}:${accountId}:cert/${certId}`;
+          }
+        }
       } catch (error) {
-        console.warn(`Failed to detach policy from cert ${certId}:`, error);
+        console.warn(`Failed to list thing principals for ${thingName}:`, error);
+        // Continue with manual ARN construction
+        const region = process.env.AWS_REGION || 'us-east-1';
+        const accountId = process.env.AWS_ACCOUNT_ID;
+        if (accountId) {
+          certArn = `arn:aws:iot:${region}:${accountId}:cert/${certId}`;
+        }
       }
 
-      // 3. Detach certificate from thing
-      try {
-        await this.iot.send(
-          new DetachThingPrincipalCommand({
-            thingName,
-            principal: certArn,
-          }),
-        );
-      } catch (error) {
-        console.warn(`Failed to detach cert from thing ${thingName}:`, error);
+      if (!certArn) {
+        console.error(`Cannot determine certificate ARN for ${certId}. Skipping AWS cleanup.`);
+      } else {
+        console.log(`Using certificate ARN: ${certArn}`);
+
+        // 2. Detach policy from certificate
+        try {
+          await this.iot.send(
+            new DetachPolicyCommand({
+              policyName: this.tenantPolicy,
+              target: certArn,
+            }),
+          );
+          console.log(`✅ Detached policy ${this.tenantPolicy} from cert ${certId}`);
+        } catch (error: any) {
+          console.warn(`Failed to detach policy from cert ${certId}:`, error.message);
+          // Continue with cleanup even if policy detach fails
+        }
+
+        // 3. Detach certificate from thing
+        try {
+          await this.iot.send(
+            new DetachThingPrincipalCommand({
+              thingName,
+              principal: certArn,
+            }),
+          );
+          console.log(`✅ Detached cert ${certId} from thing ${thingName}`);
+        } catch (error: any) {
+          console.warn(`Failed to detach cert from thing ${thingName}:`, error.message);
+          // Continue with cleanup even if detach fails
+        }
+
+        // 4. Deactivate certificate before deletion
+        try {
+          await this.iot.send(
+            new UpdateCertificateCommand({
+              certificateId: certId,
+              newStatus: CertificateStatus.INACTIVE,
+            }),
+          );
+          console.log(`✅ Deactivated cert ${certId}`);
+        } catch (error: any) {
+          console.warn(`Failed to deactivate cert ${certId}:`, error.message);
+          // Continue even if deactivation fails
+        }
+
+        // 5. Delete certificate (only after detaching from all things and policies)
+        try {
+          await this.iot.send(
+            new DeleteCertificateCommand({
+              certificateId: certId,
+            }),
+          );
+          console.log(`✅ Deleted cert ${certId}`);
+        } catch (error: any) {
+          console.warn(`Failed to delete cert ${certId}:`, error.message);
+          // Certificate might still be attached to something
+        }
       }
 
-      // 4. Deactivate certificate
-      try {
-        await this.iot.send(
-          new UpdateCertificateCommand({
-            certificateId: certId,
-            newStatus: CertificateStatus.INACTIVE,
-          }),
-        );
-      } catch (error) {
-        console.warn(`Failed to deactivate cert ${certId}:`, error);
-      }
-
-      // 5. Delete certificate
-      try {
-        await this.iot.send(
-          new DeleteCertificateCommand({
-            certificateId: certId,
-          }),
-        );
-      } catch (error) {
-        console.warn(`Failed to delete cert ${certId}:`, error);
-      }
-
-      // 6. Delete thing
+      // 6. Delete thing (only after all certificates are detached)
       try {
         await this.iot.send(
           new DeleteThingCommand({
             thingName,
           }),
         );
-      } catch (error) {
-        console.warn(`Failed to delete thing ${thingName}:`, error);
+        console.log(`✅ Deleted thing ${thingName}`);
+      } catch (error: any) {
+        console.warn(`Failed to delete thing ${thingName}:`, error.message);
+        // Thing might still have certificates attached
       }
 
-      // 7. Delete S3 certificate pack
+      // 7. Delete S3 certificate pack (this should always work)
       if (packS3Key) {
         try {
           await this.s3Svc.deleteObject(packS3Key);
-        } catch (error) {
-          console.warn(`Failed to delete S3 object ${packS3Key}:`, error);
+          console.log(`✅ Deleted S3 object ${packS3Key}`);
+        } catch (error: any) {
+          console.warn(`Failed to delete S3 object ${packS3Key}:`, error.message);
         }
       }
 
+      console.log(`🎉 Cleanup completed for gateway ${thingName}`);
+
     } catch (error) {
-      console.error(`Error during gateway cleanup for ${thingName}:`, error);
-      throw error;
+      console.error(`❌ Error during gateway cleanup for ${thingName}:`, error);
+      // Don't throw - we want cleanup to be non-blocking
     }
   }
 }
