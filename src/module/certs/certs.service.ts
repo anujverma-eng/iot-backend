@@ -68,8 +68,8 @@ export class CertsService {
 
     /* 3️⃣ Build ZIP buffer */
     const zip = new JSZip();
-    zip.file(`${thingName}-certificate.pem`, cert.certificatePem!);
-    zip.file(`${thingName}-private.key`, cert.keyPair!.PrivateKey!);
+    zip.file(`${thingName}-cert.pem`, cert.certificatePem!);
+    zip.file(`${thingName}.key`, cert.keyPair!.PrivateKey!);
     zip.file('AmazonRootCA1.pem', AMAZON_ROOT_CA_1);
     const zipBuf = await zip.generateAsync({ type: 'nodebuffer' });
 
