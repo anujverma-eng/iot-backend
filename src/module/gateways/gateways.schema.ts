@@ -1,6 +1,6 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
 import { Document, Types } from 'mongoose';
-import { GatewayStatus } from './enums/gateway.enum';
+import { GatewayLiveStatus, GatewayStatus } from './enums/gateway.enum';
 
 export type GatewayDocument = Gateway & Document;
 
@@ -28,6 +28,11 @@ export class Gateway {
     default: GatewayStatus.ACTIVE,
   })
   status: GatewayStatus;
+
+  @Prop({ 
+    default: false,
+   })
+  isConnected: boolean;
 
   @Prop()
   firmwareVersion?: string;

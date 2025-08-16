@@ -18,6 +18,7 @@ import { RolesGuard } from './module/auth/roles.guard';
 import { AuthModule } from './module/auth/auth.module';
 import { TelemetryModule } from './module/telemetry/telemetry.module';
 import { IotModule } from './module/iot/iot.module';
+import { RealtimeModule } from './module/realtime/realtime.module';
 
 @Module({
   imports: [
@@ -35,6 +36,7 @@ import { IotModule } from './module/iot/iot.module';
     RogueGatewaysModule,
     TelemetryModule,
     IotModule,
+    RealtimeModule,
   ],
   controllers: [AppController],
   providers: [

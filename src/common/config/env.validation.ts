@@ -13,8 +13,11 @@ export const envValidationSchema = Joi.object({
   COGNITO_USER_POOL_ID: Joi.string().required(),
   COGNITO_APP_CLIENT_ID: Joi.string().required(),
   COGNITO_DOMAIN: Joi.string().required(),
+  COGNITO_IDENTITY_POOL_ID: Joi.string().required(),
   // AWS_ACCESS_KEY_ID: Joi.string().required(),
   // AWS_SECRET_ACCESS_KEY: Joi.string().required(),
   // AWS_REGION: Joi.string().required(),
   // AWS_CERT_BUCKET: Joi.string().required(),
+  IOT_ENDPOINT: Joi.string(),
+  IOT_VIEWER_ROLE_ARN: Joi.string().required(),
 });

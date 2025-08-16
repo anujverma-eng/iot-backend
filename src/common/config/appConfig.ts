@@ -17,5 +17,6 @@ export default () => ({
     region: process.env.AWS_REGION,
     certBucket: process.env.AWS_CERT_BUCKET,
     iotEndpoint: process.env.IOT_ENDPOINT,
+    iotViewerRoleArn: process.env.IOT_VIEWER_ROLE_ARN,
   },
 });

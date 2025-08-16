@@ -179,6 +179,7 @@ export class GatewaysService {
           createdAt: 1,
           updatedAt: 1,
           sensorCounts: 1,
+          isConnected: 1,
         },
       },
     ];

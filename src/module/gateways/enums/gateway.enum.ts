@@ -1,5 +1,11 @@
 export enum GatewayStatus {
   ACTIVE = 'active',
-  OFFLINE = 'offline',
   REVOKED = 'revoked',
+}
+
+export enum GatewayLiveStatus {
+  ONLINE = 'online',
+  OFFLINE = 'offline',
+  UNREACHABLE = 'unreachable',
+  UNKNOWN = 'unknown',
 }
