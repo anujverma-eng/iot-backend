@@ -51,6 +51,12 @@ export class Sensor {
 
   @Prop({ default: false })
   favorite: boolean;
+
+  @Prop({default: false})
+  isOnline: boolean;
+
+  @Prop({ default: 0 })
+  battery: number;
 }
 
 export const SensorSchema = SchemaFactory.createForClass(Sensor);
