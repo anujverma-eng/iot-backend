@@ -37,13 +37,8 @@ export class Gateway {
   @Prop()
   firmwareVersion?: string;
 
-  @Prop({
-    type: Object,
-  })
-  location?: {
-    lat: number;
-    lng: number;
-  };
+  @Prop({ default: '' })
+  location?: string;
 
   @Prop()
   lastSeen?: Date;
@@ -68,4 +63,4 @@ export class Gateway {
 export const GatewaySchema = SchemaFactory.createForClass(Gateway);
 
 GatewaySchema.index({ orgId: 1 });
-GatewaySchema.index({ mac: 'text', label: 'text' });
+GatewaySchema.index({ mac: 'text', label: 'text', location: 'text' });

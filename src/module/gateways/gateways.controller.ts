@@ -123,9 +123,9 @@ export class GatewaysController {
   update(
     @Param('id') id: string,
     @Req() req: any,
-    @Body() dto: { label?: string },
+    @Body() dto: { label?: string; location?: string },
   ) {
-    return this.gwSvc.updateLabel(id, req.user.orgId, dto.label);
+    return this.gwSvc.updateGateway(id, req.user.orgId, dto);
   }
 
   @Post(':id/sensors')

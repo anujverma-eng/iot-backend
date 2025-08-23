@@ -67,7 +67,7 @@ export class GatewaysService {
     return results;
   }
 
-  async registerForOrg(orgId: string, dto: { mac: string; label?: string }) {
+  async registerForOrg(orgId: string, dto: { mac: string; label?: string; location?: string }) {
     if (!orgId) throw new BadRequestException('You are not in an organization');
 
     /* 1️⃣ plan quota */
@@ -101,6 +101,7 @@ export class GatewaysService {
       packS3Key: bundle.packS3Key,
       status: GatewayStatus.ACTIVE,
       ...(dto.label && { label: dto.label }),
+      ...(dto.location && { location: dto.location }),
     });
 
     return { ...saved.toObject(), downloadUrl: bundle.download };
@@ -118,13 +119,14 @@ export class GatewaysService {
     };
 
     // 2. If `search` is supplied, create a case-insensitive regex
-    //    and also match against `mac` OR `label`. Otherwise, skip it.
+    //    and also match against `mac` OR `label` OR `location`. Otherwise, skip it.
     const searchStage: PipelineStage.Match | null = search
       ? {
           $match: {
             $or: [
               { mac: { $regex: search.trim(), $options: 'i' } },
               { label: { $regex: search.trim(), $options: 'i' } },
+              { location: { $regex: search.trim(), $options: 'i' } },
             ],
           },
         }
@@ -176,6 +178,7 @@ export class GatewaysService {
           status: 1,
           lastSeen: 1,
           label: 1,
+          location: 1,
           createdAt: 1,
           updatedAt: 1,
           sensorCounts: 1,
@@ -240,7 +243,7 @@ export class GatewaysService {
     const gw = await this.gwModel
       .findOne(params)
       .select(
-        '_id mac status claimCode lastSeen createdAt updatedAt orgId label',
+        '_id mac status claimCode lastSeen createdAt updatedAt orgId label location',
       )
       .lean();
     if (!gw) throw new NotFoundException('Gateway not found in your org');
@@ -285,15 +288,24 @@ export class GatewaysService {
     return { totalGateways: totals, liveGateways: live };
   }
 
-  /** update just the label */
-  async updateLabel(id: string, orgId: string, label?: string) {
+  /** update gateway fields (label, location) */
+  async updateGateway(id: string, orgId: string, updates: { label?: string; location?: string }) {
+    const updateFields: any = {};
+    if (updates.label !== undefined) updateFields.label = updates.label;
+    if (updates.location !== undefined) updateFields.location = updates.location;
+
     const gw = await this.gwModel.findOneAndUpdate(
       { _id: id, orgId },
-      { $set: { label } },
+      { $set: updateFields },
       { new: true },
     );
     if (!gw) throw new NotFoundException('Gateway not found in your org');
     return gw.toObject();
+  }
+
+  /** update just the label - keeping for backward compatibility */
+  async updateLabel(id: string, orgId: string, label?: string) {
+    return this.updateGateway(id, orgId, { label });
   }
 
   /** sensors under a gateway with filtering / sorting */

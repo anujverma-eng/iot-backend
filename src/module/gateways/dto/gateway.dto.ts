@@ -30,6 +30,10 @@ export class CreateGatewayDto {
   @IsOptional()
   @IsString()
   firmwareVersion?: string;
+
+  @IsOptional()
+  @IsString()
+  location?: string;
 }
 
 export class UpdateGatewayDto extends CreateGatewayDto {}
@@ -42,6 +46,11 @@ export class AdminCreateGatewayDto {
   @IsOptional()
   @IsString()
   label?: string;
+
+  /** Optional location information */
+  @IsOptional()
+  @IsString()
+  location?: string;
 }
 
 export class CreateGatewayAdminDto {
@@ -67,4 +76,9 @@ export class RegisterGatewayDto {
   @IsOptional()
   @IsString()
   label?: string;
+
+  /** Optional location information */
+  @IsOptional()
+  @IsString()
+  location?: string;
 }
