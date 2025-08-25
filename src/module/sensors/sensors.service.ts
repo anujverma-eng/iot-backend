@@ -203,11 +203,14 @@ export class SensorsService {
   async updateSensor(
     mac: string,
     orgId: Types.ObjectId,
-    dto: { displayName?: string },
+    dto: { displayName?: string, isOnline?: boolean },
   ) {
     const s = await this.sensorModel.findOneAndUpdate(
       { _id: mac, orgId },
-      { $set: { displayName: dto.displayName } },
+      { $set: { 
+        displayName: dto.displayName, 
+        ...(!!dto.isOnline && { isOnline: dto.isOnline }),
+      } },
       { new: true },
     );
     if (!s) throw new NotFoundException('Sensor not found in your org');

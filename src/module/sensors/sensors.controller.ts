@@ -122,7 +122,7 @@ export class SensorsController {
   updateSensor(
     @Param('mac') mac: string,
     @Req() req: any,
-    @Body() dto: { displayName?: string },
+    @Body() dto: { displayName?: string, isOnline?: boolean },
   ) {
     return this.svc.updateSensor(mac.toUpperCase(), req.user.orgId, dto);
   }
