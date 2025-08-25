@@ -84,7 +84,7 @@ export class SensorsService {
     // 2. build the “base” query for sensors in those gateways
     const base: any = {
       ignored: { $ne: true },
-      lastSeenBy: { $in: gatewayIds },
+      // lastSeenBy: { $in: gatewayIds },
       $or: [{ orgId }, { orgId: null }],
       ...(type && { type }),
     };

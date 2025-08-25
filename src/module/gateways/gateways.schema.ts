@@ -16,7 +16,6 @@ export class Gateway {
     type: Types.ObjectId,
     ref: 'Organization',
     default: null,
-    index: true,
   })
   orgId: Types.ObjectId | null;
 

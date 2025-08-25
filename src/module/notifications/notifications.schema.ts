@@ -10,7 +10,6 @@ export class Notification {
     type: Types.ObjectId,
     ref: 'Organization',
     required: true,
-    index: true,
   })
   orgId: Types.ObjectId;
 

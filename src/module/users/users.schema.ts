@@ -16,9 +16,6 @@ export class User {
   @Prop({ required: true })
   email: string;
 
-  @Prop()
-  displayName?: string;
-
   @Prop({ required: false })
   cognitoSub?: string;
 
@@ -33,9 +30,6 @@ export class User {
     default: UserStatus.ACTIVE,
   })
   status: UserStatus;
-
-  @Prop()
-  lastLogin?: Date;
 }
 
 export const UserSchema = SchemaFactory.createForClass(User);

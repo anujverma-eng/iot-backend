@@ -9,7 +9,7 @@ export class Sensor {
   @Prop({ _id: true, type: String })
   _id: string; // sensor MAC (PK)
 
-  @Prop({ required: true, index: true })
+  @Prop({ required: true })
   mac: string;
 
   /** Set only when user claims it */
