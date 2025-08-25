@@ -14,7 +14,7 @@ export class RogueGateway {
   @Prop({ default: Date.now })
   firstSeen: Date;
 
-  @Prop({ default: Date.now, index: true })
+  @Prop({ default: Date.now })
   lastAttempt: Date;
 
   @Prop({ default: 1 })

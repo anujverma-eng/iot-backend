@@ -14,7 +14,7 @@ export class Organization {
   @Prop({ type: Types.ObjectId, ref: 'Plan', required: true })
   planId: Types.ObjectId;
 
-  @Prop({ default: false, index: true })
+  @Prop({ default: false })
   needsUpgrade: boolean;
 
   @Prop() planActivatedAt?: Date;
