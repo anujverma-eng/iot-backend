@@ -209,7 +209,7 @@ export class SensorsService {
       { _id: mac, orgId },
       { $set: { 
         displayName: dto.displayName, 
-        ...(!!dto.isOnline && { isOnline: dto.isOnline }),
+        ...(dto.isOnline !== undefined && { isOnline: dto.isOnline }),
       } },
       { new: true },
     );
