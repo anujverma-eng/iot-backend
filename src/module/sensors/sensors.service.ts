@@ -11,6 +11,7 @@ import { UserRole } from '../users/enums/users.enum';
 import { ClaimSensorDto } from './dto/sensor.dto';
 import { Telemetry } from '../telemetry/telemetry.schema';
 import { SensorType } from './enums/sensor.enum';
+import { SettingsService } from '../settings/settings.service';
 
 @Injectable()
 export class SensorsService {
@@ -20,7 +21,96 @@ export class SensorsService {
     @InjectModel(Gateway.name) private readonly gwModel: Model<GatewayDocument>,
     @InjectModel(Telemetry.name)
     private readonly telemetryModel: Model<Telemetry>,
+    private readonly settingsService: SettingsService,
   ) {}
+
+  /**
+   * Check and update sensor online status based on organization settings
+   */
+  private async calculateAndUpdateSensorOnlineStatus(sensors: any[], orgId: Types.ObjectId): Promise<void> {
+    try {
+      // Get the organization's settings
+      const settings = await this.settingsService.findByOrgId(orgId.toString());
+      
+      if (!settings || !settings.sensorOfflineTimeOut) {
+        // If no settings found or no timeout configured, skip the check
+        return;
+      }
+
+      const currentTime = new Date();
+      const timeoutMinutes = settings.sensorOfflineTimeOut;
+      const timeoutMs = timeoutMinutes * 60 * 1000; // Convert minutes to milliseconds
+
+      const sensorsToUpdate: { mac: string; isOnline: boolean }[] = [];
+
+      // First pass: Update the sensors array in memory and collect changes for DB
+      for (const sensor of sensors) {
+        if (!sensor.updatedAt) continue;
+
+        const lastUpdated = new Date(sensor.updatedAt);
+        const timeDifference = currentTime.getTime() - lastUpdated.getTime();
+        
+        // If time difference is greater than timeout, sensor should be offline
+        const shouldBeOnline = timeDifference <= timeoutMs;
+        
+        // Update the sensor object immediately for the response
+        if (sensor.isOnline !== shouldBeOnline) {
+          sensorsToUpdate.push({
+            mac: sensor.mac,
+            isOnline: shouldBeOnline
+          });
+          
+          // Update the sensor in memory immediately
+          sensor.isOnline = shouldBeOnline;
+        }
+      }
+
+      // Asynchronously update the database without blocking the response
+      if (sensorsToUpdate.length > 0) {
+        const bulkOps = sensorsToUpdate.map(({ mac, isOnline }) => ({
+          updateOne: {
+            filter: { mac },
+            update: { isOnline }
+          }
+        }));
+
+        // Fire and forget - don't await this to avoid blocking the response
+        this.sensorModel.bulkWrite(bulkOps).catch(error => {
+          console.error('Error updating sensor online status in database:', error);
+        });
+      }
+    } catch (error) {
+      // Log error but don't fail the entire request
+      console.error('Error checking sensor online status:', error);
+    }
+  }
+
+  /**
+   * Public method to manually check and update sensor online status for an organization
+   */
+  async updateSensorOnlineStatusForOrg(orgId: Types.ObjectId): Promise<{ updated: number }> {
+    try {
+      // Get all sensors for this organization
+      const sensors = await this.sensorModel
+        .find({
+          $or: [{ orgId }, { orgId: null }],
+          ignored: { $ne: true }
+        })
+        .lean();
+
+      if (sensors.length === 0) {
+        return { updated: 0 };
+      }
+
+      const initialLength = sensors.length;
+      await this.calculateAndUpdateSensorOnlineStatus(sensors, orgId);
+      
+      return { updated: initialLength };
+    } catch (error) {
+      console.error('Error updating sensor online status for org:', error);
+      throw error;
+    }
+  }
 
   async getMeta(ids: string[]) {
     const docs = await this.sensorModel
@@ -59,6 +149,9 @@ export class SensorsService {
       .skip((page - 1) * limit)
       .limit(limit)
       .lean();
+
+    // Check and update sensor online status based on settings
+    await this.calculateAndUpdateSensorOnlineStatus(rows, callerOrg);
 
     return { rows, total };
   }
@@ -122,6 +215,9 @@ export class SensorsService {
         .lean();
       sensor.lastValue = lastReading?.value || 0;
     }
+
+    // 8. Check and update sensor online status based on settings
+    await this.calculateAndUpdateSensorOnlineStatus(rows, orgId);
 
     return { rows, total };
   }
@@ -196,6 +292,10 @@ export class SensorsService {
       })
       .lean();
     if (!s) throw new NotFoundException('Sensor not visible to your org');
+    
+    // Check and update sensor online status based on settings
+    await this.calculateAndUpdateSensorOnlineStatus([s], orgId);
+    
     return s;
   }
 
