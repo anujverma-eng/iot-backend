@@ -13,6 +13,8 @@ import {
 import { SensorsService } from '../sensors/sensors.service';
 import { Sensor, SensorSchema } from '../sensors/sensors.schema';
 import { Gateway, GatewaySchema } from '../gateways/gateways.schema';
+import { SettingsService } from '../settings/settings.service';
+import { SettingsModule } from '../settings/settings.module';
 @Module({
   imports: [
     MongooseModule.forFeature([
@@ -22,9 +24,10 @@ import { Gateway, GatewaySchema } from '../gateways/gateways.schema';
       { name: Sensor.name, schema: SensorSchema },
       { name: Gateway.name, schema: GatewaySchema },
     ]),
+    SettingsModule,
   ],
   controllers: [TelemetryController],
-  providers: [TelemetryService, UsersService, SensorsService],
+  providers: [TelemetryService, UsersService, SensorsService, SettingsService],
   exports: [MongooseModule, TelemetryService],
 })
 export class TelemetryModule {}
