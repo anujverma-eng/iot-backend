@@ -19,4 +19,12 @@ export default () => ({
     iotEndpoint: process.env.IOT_ENDPOINT,
     iotViewerRoleArn: process.env.IOT_VIEWER_ROLE_ARN,
   },
+  ses: {
+    region: process.env.SES_REGION ?? process.env.AWS_REGION ?? 'us-east-1',
+    fromEmail: process.env.SES_FROM_EMAIL,
+    configSet: process.env.SES_CONFIG_SET,
+  },
+  app: {
+    frontendUrl: process.env.FRONTEND_URL ?? 'http://localhost:3001',
+  },
 });

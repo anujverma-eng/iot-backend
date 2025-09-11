@@ -30,13 +30,14 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
       sub: payload.sub,
       email: payload.email,
     }) as any;
-    /* req.user will be: { sub, email, role, orgId } */
+    
+    /* Return minimal user info - org context will be resolved by OrgContextGuard */
     return {
       userId: user._id.toString(),   
       sub: payload.sub,
       email: payload.email,
-      role: user.role,
-      orgId: user.orgId ?? null,
+      role: user?.role,
+      orgId: user?.orgId,
     };
   }
 }

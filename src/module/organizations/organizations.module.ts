@@ -3,6 +3,7 @@ import { MongooseModule } from '@nestjs/mongoose';
 import { Organization, OrganizationSchema } from './organizations.schema';
 import { Plan, PlanSchema } from '../plans/plans.schema';
 import { User, UserSchema } from '../users/users.schema';
+import { Membership, MembershipSchema } from '../memberships/memberships.schema';
 import { OrganizationsService } from './organizations.service';
 import { OrganizationsController } from './organizations.controller';
 import { UsersModule } from '../users/users.module';
@@ -13,6 +14,7 @@ import { UsersModule } from '../users/users.module';
       { name: Organization.name, schema: OrganizationSchema },
       { name: Plan.name, schema: PlanSchema },
       { name: User.name, schema: UserSchema },
+      { name: Membership.name, schema: MembershipSchema },
     ]),
     UsersModule,
   ],

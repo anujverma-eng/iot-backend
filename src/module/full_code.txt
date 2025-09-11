@@ -1,0 +1,4872 @@
+Directory Tree:
+module/
+│   ├── full_code.txt
+│   ├── organizations/
+│   │   ├── organizations.service.ts
+│   │   ├── organizations.controller.ts
+│   │   ├── organizations.schema.ts
+│   │   ├── organizations.module.ts
+│   │   ├── dto/
+│   │   │   ├── organization.dto.ts
+│   │   ├── enums/
+│   │   │   ├── organization.enum.ts
+│   ├── settings/
+│   │   ├── settings.module.ts
+│   │   ├── settings.schema.ts
+│   │   ├── settings.service.ts
+│   │   ├── settings.controller.ts
+│   │   ├── dto/
+│   │   │   ├── settings.dto.ts
+│   ├── sensors/
+│   │   ├── sensors.schema.ts
+│   │   ├── sensors.service.ts
+│   │   ├── sensors.module.ts
+│   │   ├── sensors.controller.ts
+│   │   ├── dto/
+│   │   │   ├── sensor.dto.ts
+│   │   ├── enums/
+│   │   │   ├── sensor.enum.ts
+│   ├── auth/
+│   │   ├── roles.guard.ts
+│   │   ├── jwt.strategy.ts
+│   │   ├── jwt-auth.guard.ts
+│   │   ├── roles.decorator.ts
+│   │   ├── permission.guard.ts
+│   │   ├── auth.module.ts
+│   │   ├── public.decorator.ts
+│   ├── mail/
+│   │   ├── mail.module.ts
+│   │   ├── mail.service.ts
+│   ├── memberships/
+│   │   ├── memberships.schema.ts
+│   │   ├── memberships.module.ts
+│   │   ├── memberships.controller.ts
+│   │   ├── memberships.service.ts
+│   │   ├── dto/
+│   │   │   ├── membership.dto.ts
+│   ├── users/
+│   │   ├── users.schema.ts
+│   │   ├── users.service.ts
+│   │   ├── users.controller.ts
+│   │   ├── users.module.ts
+│   │   ├── dto/
+│   │   │   ├── user.dto.ts
+│   │   ├── enums/
+│   │   │   ├── users.enum.ts
+│   ├── gateways/
+│   │   ├── gateways.schema.ts
+│   │   ├── gateways.controller.ts
+│   │   ├── gateways.module.ts
+│   │   ├── gateways.service.ts
+│   │   ├── dto/
+│   │   │   ├── gateway.dto.ts
+│   │   ├── enums/
+│   │   │   ├── gateway.enum.ts
+│   ├── invites/
+│   │   ├── invites.controller.ts
+│   │   ├── invites.module.ts
+│   │   ├── invites.schema.ts
+│   │   ├── invites.service.ts
+│   │   ├── dto/
+│   │   │   ├── invite.dto.ts
+
+
+
+
+# ======================
+# File: organizations/organizations.service.ts
+# ======================
+
+import {
+  BadRequestException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
+import { InjectModel } from '@nestjs/mongoose';
+import { Organization, OrganizationDocument } from './organizations.schema';
+import { Model, Types } from 'mongoose';
+import { Plan, PlanDocument } from '../plans/plans.schema';
+import { PlanName } from '../plans/enums/plan.enum';
+import { User, UserDocument } from '../users/users.schema';
+import { UserRole } from '../users/enums/users.enum';
+import { CreateOrganizationDto } from './dto/organization.dto';
+import { Membership, MembershipDocument, MembershipStatus } from '../memberships/memberships.schema';
+
+@Injectable()
+export class OrganizationsService {
+  constructor(
+    @InjectModel(Organization.name)
+    private readonly orgModel: Model<OrganizationDocument>,
+    @InjectModel(Plan.name)
+    private readonly planModel: Model<PlanDocument>,
+    @InjectModel(User.name)
+    private readonly userModel: Model<UserDocument>,
+    @InjectModel(Membership.name)
+    private readonly membershipModel: Model<MembershipDocument>,
+  ) {}
+
+  async createOrgAndSetOwner(
+    ownerId: Types.ObjectId,
+    dto: CreateOrganizationDto,
+  ) {
+    // Check if user already owns an organization
+    const hasOwnerMembership = await this.membershipModel.exists({
+      userId: ownerId,
+      role: UserRole.OWNER,
+      status: MembershipStatus.ACTIVE
+    });
+    
+    if (hasOwnerMembership) {
+      throw new BadRequestException('You already own an organization');
+    }
+
+    const caller = await this.userModel.findById(ownerId).lean();
+    if (!caller) throw new BadRequestException('User not found');
+
+    const planToUse = dto?.planId
+      ? await this.planModel.findById(dto.planId).lean()
+      : await this.planModel.findOne({ name: PlanName.FREE }).lean();
+    if (!planToUse) throw new BadRequestException('Plan not found');
+
+    if (!planToUse) throw new Error('Free plan missing – run seed first');
+
+    /* create org & update user in a single session */
+    const session = await this.orgModel.db.startSession();
+    try {
+      session.startTransaction();
+
+      const org = await this.orgModel.create(
+        [
+          {
+            name: dto.name,
+            domain: caller.email.split('@')[1], // e.g., acme.com
+            planId: planToUse._id,
+          },
+        ],
+        { session },
+      );
+
+      // Update user (legacy field for backward compatibility)
+      await this.userModel.updateOne(
+        { _id: ownerId },
+        { $set: { orgId: org[0]._id, role: UserRole.OWNER } },
+        { session },
+      );
+
+      // Create membership (new multi-org system)
+      await this.membershipModel.create(
+        [
+          {
+            userId: new Types.ObjectId(ownerId),
+            orgId: org[0]._id,
+            role: UserRole.OWNER,
+            status: MembershipStatus.ACTIVE,
+            acceptedAt: new Date(),
+          },
+        ],
+        { session }
+      );
+
+      await session.commitTransaction();
+      return org[0];
+    } catch (err) {
+      await session.abortTransaction();
+      if (err.code === 11000) {
+        throw new BadRequestException('Organization name already exists');
+      }
+      throw err;
+    } finally {
+      session.endSession();
+    }
+  }
+
+  async findByIdWithPlan(id: Types.ObjectId | string) {
+    const org = await this.orgModel
+      .findById(id)
+      .populate('planId')
+      .lean()
+      .exec();
+
+    if (!org) throw new NotFoundException('Organization not found');
+    return org;
+  }
+
+  /**
+   * Update organization
+   */
+  async updateOrganization(orgId: string, dto: { name?: string; domain?: string }) {
+    try {
+      const org = await this.orgModel.findByIdAndUpdate(
+        orgId,
+        { $set: dto },
+        { new: true, runValidators: true }
+      );
+
+      if (!org) {
+        throw new NotFoundException('Organization not found');
+      }
+
+      return org;
+    } catch (error) {
+      if (error.code === 11000) {
+        throw new BadRequestException('Organization name already exists');
+      }
+      throw new BadRequestException('Failed to update organization');
+    }
+  }
+}
+
+
+# ======================
+# File: organizations/organizations.controller.ts
+# ======================
+
+import {
+  Body,
+  Controller,
+  Post,
+  Get,
+  Patch,
+  Param,
+  Req,
+  UseGuards,
+  HttpCode,
+  HttpStatus,
+  BadRequestException,
+} from '@nestjs/common';
+import { JwtAuthGuard } from '../auth/jwt-auth.guard';
+import { OrgContextGuard } from '../../auth/org-context.guard';
+import { RolesGuard } from '../auth/roles.guard';
+import { PermissionGuard, RequiredPermissions } from '../auth/permission.guard';
+import { OrganizationsService } from './organizations.service';
+import { UserRole } from '../users/enums/users.enum';
+import { CreateOrganizationDto, UpdateOrganizationDto } from './dto/organization.dto';
+import { Roles } from '../auth/roles.decorator';
+import { OrgContextUser } from '../../auth/org-context.guard';
+import { PERMISSIONS } from '../../common/constants/permissions';
+
+@Controller('organizations')
+export class OrganizationsController {
+  constructor(private readonly svc: OrganizationsService) {}
+
+  /** First‑time org creation */
+  @Post()
+  @UseGuards(JwtAuthGuard)
+  @HttpCode(HttpStatus.CREATED)
+  async create(
+    @Body() dto: CreateOrganizationDto, 
+    @Req() req: { user: OrgContextUser }
+  ) {
+    const org = await this.svc.createOrgAndSetOwner(
+      req.user.userId as any,
+      dto,
+    );
+    return org;
+  }
+
+  /** Get current user's organization info */
+  @Get('me')
+  @UseGuards(JwtAuthGuard, OrgContextGuard, PermissionGuard)
+  @RequiredPermissions(PERMISSIONS.ORG.VIEW)
+  async getMe(@Req() req: { user: OrgContextUser }) {
+    const { orgId } = req.user;
+    if (!orgId) throw new BadRequestException('You are not in an organization');
+
+    const org = await this.svc.findByIdWithPlan(orgId) as any;
+
+    return {
+      _id: org._id,
+      name: org.name,
+      needsUpgrade: org.needsUpgrade,
+      plan: {
+        name: org.planId.name,
+        maxGateways: org.planId.maxGateways,
+        maxSensors: org.planId.maxSensors,
+        maxUsers: org.planId.maxUsers,
+        retentionDays: org.planId.retentionDays,
+      },
+      createdAt: org.createdAt,
+    };
+  }
+
+  /** Rename organization */
+  @Patch(':orgId')
+  @UseGuards(JwtAuthGuard, OrgContextGuard, PermissionGuard)
+  @RequiredPermissions(PERMISSIONS.ORG.RENAME)
+  @HttpCode(HttpStatus.OK)
+  async updateOrganization(
+    @Param('orgId') orgId: string,
+    @Body() dto: UpdateOrganizationDto,
+    @Req() req: { user: OrgContextUser }
+  ) {
+    // Verify user has permission for this specific org
+    if (req.user.orgId !== orgId) {
+      throw new BadRequestException('Organization ID mismatch');
+    }
+
+    const org = await this.svc.updateOrganization(orgId, dto);
+    return {
+      message: 'Organization updated successfully',
+      organization: {
+        id: org._id,
+        name: org.name,
+      },
+    };
+  }
+}
+
+
+# ======================
+# File: organizations/organizations.schema.ts
+# ======================
+
+import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
+import { Document, Types } from 'mongoose';
+
+export type OrganizationDocument = Organization & Document;
+
+@Schema({ collection: 'organizations', timestamps: true })
+export class Organization {
+  @Prop({ required: true, unique: true })
+  name: string;
+
+  @Prop()
+  domain?: string;
+
+  @Prop({ type: Types.ObjectId, ref: 'Plan', required: true })
+  planId: Types.ObjectId;
+
+  @Prop({ default: false })
+  needsUpgrade: boolean;
+
+  @Prop() planActivatedAt?: Date;
+
+  @Prop() planExpiresAt?: Date;
+}
+
+export const OrganizationSchema = SchemaFactory.createForClass(Organization);
+OrganizationSchema.index({ domain: 1 });
+
+
+# ======================
+# File: organizations/organizations.module.ts
+# ======================
+
+import { Module } from '@nestjs/common';
+import { MongooseModule } from '@nestjs/mongoose';
+import { Organization, OrganizationSchema } from './organizations.schema';
+import { Plan, PlanSchema } from '../plans/plans.schema';
+import { User, UserSchema } from '../users/users.schema';
+import { Membership, MembershipSchema } from '../memberships/memberships.schema';
+import { OrganizationsService } from './organizations.service';
+import { OrganizationsController } from './organizations.controller';
+import { UsersModule } from '../users/users.module';
+
+@Module({
+  imports: [
+    MongooseModule.forFeature([
+      { name: Organization.name, schema: OrganizationSchema },
+      { name: Plan.name, schema: PlanSchema },
+      { name: User.name, schema: UserSchema },
+      { name: Membership.name, schema: MembershipSchema },
+    ]),
+    UsersModule,
+  ],
+  providers: [OrganizationsService],
+  controllers: [OrganizationsController],
+  exports: [MongooseModule, OrganizationsService],
+})
+export class OrganizationsModule {}
+
+
+# ======================
+# File: organizations/dto/organization.dto.ts
+# ======================
+
+import { IsMongoId, IsOptional, IsString, Length } from 'class-validator';
+
+export class CreateOrganizationDto {
+  @IsString()
+  @Length(2, 60)
+  name: string;
+
+  @IsOptional()
+  @IsString()
+  domain?: string;
+
+  @IsOptional()
+  @IsMongoId()
+  planId?: string;
+}
+
+export class UpdateOrganizationDto extends CreateOrganizationDto {}
+
+
+# ======================
+# File: organizations/enums/organization.enum.ts
+# ======================
+
+export enum OrgStatus {
+  ACTIVE = 'active',
+  NEEDS_UPGRADE = 'needsUpgrade',
+}
+
+
+# ======================
+# File: settings/settings.module.ts
+# ======================
+
+import { Module } from '@nestjs/common';
+import { MongooseModule } from '@nestjs/mongoose';
+import { Settings, SettingsSchema, UserSettings, UserSettingsSchema } from './settings.schema';
+import { SettingsService } from './settings.service';
+import { SettingsController } from './settings.controller';
+import { User, UserSchema } from '../users/users.schema';
+import { Organization, OrganizationSchema } from '../organizations/organizations.schema';
+import { UsersService } from '../users/users.service';
+import { Membership, MembershipSchema } from '../memberships/memberships.schema';
+
+@Module({
+  imports: [
+    MongooseModule.forFeature([
+      { name: Settings.name, schema: SettingsSchema },
+      { name: UserSettings.name, schema: UserSettingsSchema },
+      {name: User.name, schema: UserSchema},
+      {name: Organization.name, schema: OrganizationSchema},
+      {name: Membership.name, schema: MembershipSchema}
+    ]),
+  ],
+  providers: [SettingsService, UsersService],
+  controllers: [SettingsController],
+  exports: [MongooseModule, SettingsService],
+})
+export class SettingsModule {}
+
+
+# ======================
+# File: settings/settings.schema.ts
+# ======================
+
+import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
+import { Document, Types } from 'mongoose';
+
+export type SettingsDocument = Settings & Document;
+export type UserSettingsDocument = UserSettings & Document;
+
+export enum OrgChoiceMode {
+  REMEMBER = 'remember',
+  ASK_EVERY_TIME = 'ask-every-time'
+}
+
+// Organization-level settings
+@Schema({ collection: 'settings', timestamps: true })
+export class Settings {
+  @Prop({ required: true, min: 1 })
+  sensorOfflineTimeOut: number; // in minutes
+
+  @Prop({ type: Types.ObjectId, ref: 'Organization', required: true })
+  orgId: Types.ObjectId;
+}
+
+// User-level settings
+@Schema({ collection: 'user_settings', timestamps: true })
+export class UserSettings {
+  @Prop({ type: Types.ObjectId, ref: 'User', required: true })
+  userId: Types.ObjectId;
+
+  @Prop({ type: Types.ObjectId, ref: 'Organization' })
+  defaultOrgId?: Types.ObjectId;
+
+  @Prop({ enum: OrgChoiceMode, default: OrgChoiceMode.REMEMBER })
+  orgChoiceMode: OrgChoiceMode;
+}
+
+export const SettingsSchema = SchemaFactory.createForClass(Settings);
+export const UserSettingsSchema = SchemaFactory.createForClass(UserSettings);
+
+// Indexes
+SettingsSchema.index({ orgId: 1 });
+UserSettingsSchema.index({ userId: 1 }, { unique: true });
+
+
+# ======================
+# File: settings/settings.service.ts
+# ======================
+
+import { Injectable, NotFoundException } from '@nestjs/common';
+import { InjectModel } from '@nestjs/mongoose';
+import { Model, Types } from 'mongoose';
+import { Settings, SettingsDocument, UserSettings, UserSettingsDocument } from './settings.schema';
+import { CreateSettingsDto, UpdateSettingsDto, UpdateUserSettingsDto } from './dto/settings.dto';
+
+@Injectable()
+export class SettingsService {
+  constructor(
+    @InjectModel(Settings.name) private settingsModel: Model<SettingsDocument>,
+    @InjectModel(UserSettings.name) private userSettingsModel: Model<UserSettingsDocument>,
+  ) {}
+
+  // Organization Settings Methods
+  async findByOrgId(orgId: string): Promise<SettingsDocument | null> {
+    return this.settingsModel.findOne({ orgId: new Types.ObjectId(orgId) }).exec();
+  }
+
+  async createOrUpdate(orgId: string, settingsData: CreateSettingsDto | UpdateSettingsDto): Promise<SettingsDocument> {
+    const existingSettings = await this.findByOrgId(orgId);
+    
+    if (existingSettings) {
+      return this.update(orgId, settingsData);
+    } else {
+      // For creation, ensure we have required fields
+      const createData: CreateSettingsDto = {
+        sensorOfflineTimeOut: settingsData.sensorOfflineTimeOut || 10 // Default value
+      };
+      return this.create(orgId, createData);
+    }
+  }
+
+  private async create(orgId: string, createSettingsDto: CreateSettingsDto): Promise<SettingsDocument> {
+    const settings = new this.settingsModel({
+      ...createSettingsDto,
+      orgId: new Types.ObjectId(orgId),
+    });
+    return settings.save();
+  }
+
+  private async update(orgId: string, updateSettingsDto: UpdateSettingsDto): Promise<SettingsDocument> {
+    const settings = await this.settingsModel.findOneAndUpdate(
+      { orgId: new Types.ObjectId(orgId) },
+      updateSettingsDto,
+      { new: true, runValidators: true }
+    ).exec();
+
+    if (!settings) {
+      throw new NotFoundException('Settings not found for this organization');
+    }
+
+    return settings;
+  }
+
+  // User Settings Methods
+  async findUserSettingsByUserId(userId: string): Promise<UserSettingsDocument | null> {
+    return this.userSettingsModel.findOne({ userId: new Types.ObjectId(userId) }).populate('defaultOrgId').exec();
+  }
+
+  async updateUserSettings(userId: string, updateUserSettingsDto: UpdateUserSettingsDto): Promise<UserSettingsDocument> {
+    const updateData: any = { ...updateUserSettingsDto };
+    if (updateUserSettingsDto.defaultOrgId) {
+      updateData.defaultOrgId = new Types.ObjectId(updateUserSettingsDto.defaultOrgId);
+    }
+
+    const userSettings = await this.userSettingsModel.findOneAndUpdate(
+      { userId: new Types.ObjectId(userId) },
+      updateData,
+      { new: true, runValidators: true, upsert: true }
+    ).populate('defaultOrgId').exec();
+
+    return userSettings;
+  }
+
+  async createOrUpdateUserSettings(userId: string, settingsData: UpdateUserSettingsDto): Promise<UserSettingsDocument> {
+    return this.updateUserSettings(userId, settingsData);
+  }
+}
+
+
+# ======================
+# File: settings/settings.controller.ts
+# ======================
+
+import {
+  Body,
+  Controller,
+  Get,
+  HttpCode,
+  HttpException,
+  HttpStatus,
+  Put,
+  Req,
+  UseGuards
+} from '@nestjs/common';
+import { OrgContextGuard, OrgContextUser } from '../../auth/org-context.guard';
+import { PERMISSIONS } from '../../common/constants/permissions';
+import { JwtAuthGuard } from '../auth/jwt-auth.guard';
+import { PermissionGuard, RequiredPermissions } from '../auth/permission.guard';
+import { UpdateSettingsDto, UpdateUserSettingsDto } from './dto/settings.dto';
+import { OrgChoiceMode } from './settings.schema';
+import { SettingsService } from './settings.service';
+
+@Controller('settings')
+@UseGuards(JwtAuthGuard)
+export class SettingsController {
+  constructor(private readonly settingsService: SettingsService) {}
+
+  // Organization Settings Endpoints (Admin/Owner only)
+  @UseGuards(OrgContextGuard, PermissionGuard)
+  // @RequiredPermissions(PERMISSIONS.SETTINGS.ORG_VIEW)
+  @Get()
+  async getOrgSettings(@Req() req: { user: OrgContextUser }) {
+    try {
+      if (!req.user.orgId) {
+        throw new HttpException('Organization context required', HttpStatus.BAD_REQUEST);
+      }
+
+      let settings = await this.settingsService.findByOrgId(req.user.orgId);
+      
+      // Create default settings if none exist
+      if (!settings) {
+        settings = await this.settingsService.createOrUpdate(req.user.orgId, {
+          sensorOfflineTimeOut: 30 // Default 10 minutes
+        });
+      }
+
+      return {
+        status: 'success',
+        data: {
+          sensorOfflineTimeOut: settings.sensorOfflineTimeOut,
+          orgId: settings.orgId
+        },
+        message: 'Organization settings retrieved successfully'
+      };
+    } catch (error) {
+      throw new HttpException('Error fetching organization settings', HttpStatus.INTERNAL_SERVER_ERROR);
+    }
+  }
+
+  @UseGuards(OrgContextGuard, PermissionGuard)
+  @RequiredPermissions(PERMISSIONS.SETTINGS.ORG_UPDATE)
+  @Put()
+  @HttpCode(HttpStatus.OK)
+  async updateOrgSettings(
+    @Body() updateSettingsDto: UpdateSettingsDto, 
+    @Req() req: { user: OrgContextUser }
+  ) {
+    try {
+      if (!req.user.orgId) {
+        throw new HttpException('Organization context required', HttpStatus.BAD_REQUEST);
+      }
+
+      const settings = await this.settingsService.createOrUpdate(req.user.orgId, updateSettingsDto);
+
+      return {
+        status: 'success',
+        data: {
+          sensorOfflineTimeOut: settings.sensorOfflineTimeOut,
+          orgId: settings.orgId
+        },
+        message: 'Organization settings updated successfully'
+      };
+    } catch (error) {
+      throw new HttpException('Error updating organization settings', HttpStatus.INTERNAL_SERVER_ERROR);
+    }
+  }
+
+  // User Settings Endpoints (Personal preferences)
+  @UseGuards(PermissionGuard)
+  @RequiredPermissions(PERMISSIONS.SETTINGS.USER_VIEW)
+  @Get('me')
+  async getUserSettings(@Req() req: { user: OrgContextUser }) {
+    try {
+      if (!req.user.userId) {
+        throw new HttpException('User authentication required', HttpStatus.UNAUTHORIZED);
+      }
+
+      let userSettings = await this.settingsService.findUserSettingsByUserId(req.user.userId);
+      
+      // Return default settings if none exist
+      if (!userSettings) {
+        userSettings = await this.settingsService.createOrUpdateUserSettings(req.user.userId, {
+          orgChoiceMode: OrgChoiceMode.REMEMBER
+        });
+      }
+
+      return {
+        status: 'success',
+        data: {
+          userId: userSettings.userId,
+          defaultOrgId: userSettings.defaultOrgId,
+          orgChoiceMode: userSettings.orgChoiceMode
+        },
+        message: 'User settings retrieved successfully'
+      };
+    } catch (error) {
+      throw new HttpException('Error fetching user settings', HttpStatus.INTERNAL_SERVER_ERROR);
+    }
+  }
+
+  @UseGuards(PermissionGuard)
+  @RequiredPermissions(PERMISSIONS.SETTINGS.USER_UPDATE)
+  @Put('me')
+  @HttpCode(HttpStatus.OK)
+  async updateUserSettings(
+    @Body() updateUserSettingsDto: UpdateUserSettingsDto, 
+    @Req() req: { user: OrgContextUser }
+  ) {
+    try {
+      if (!req.user.userId) {
+        throw new HttpException('User authentication required', HttpStatus.UNAUTHORIZED);
+      }
+
+      const userSettings = await this.settingsService.updateUserSettings(req.user.userId, updateUserSettingsDto);
+
+      return {
+        status: 'success',
+        data: {
+          userId: userSettings.userId,
+          defaultOrgId: userSettings.defaultOrgId,
+          orgChoiceMode: userSettings.orgChoiceMode
+        },
+        message: 'User settings updated successfully'
+      };
+    } catch (error) {
+      throw new HttpException('Error updating user settings', HttpStatus.INTERNAL_SERVER_ERROR);
+    }
+  }
+}
+
+
+# ======================
+# File: settings/dto/settings.dto.ts
+# ======================
+
+import { IsNumber, IsOptional, Min, IsEnum, IsString } from 'class-validator';
+import { OrgChoiceMode } from '../settings.schema';
+
+// Organization Settings DTOs
+export class CreateSettingsDto {
+  @IsNumber()
+  @Min(1, { message: 'Sensor offline timeout must be at least 1 minute' })
+  sensorOfflineTimeOut: number;
+}
+
+export class UpdateSettingsDto {
+  @IsOptional()
+  @IsNumber()
+  @Min(1, { message: 'Sensor offline timeout must be at least 1 minute' })
+  sensorOfflineTimeOut?: number;
+}
+
+// User Settings DTOs
+export class UpdateUserSettingsDto {
+  @IsOptional()
+  @IsString()
+  defaultOrgId?: string;
+
+  @IsOptional()
+  @IsEnum(OrgChoiceMode)
+  orgChoiceMode?: OrgChoiceMode;
+}
+
+
+# ======================
+# File: sensors/sensors.schema.ts
+# ======================
+
+import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
+import { Document, Types } from 'mongoose';
+import { SensorType } from './enums/sensor.enum';
+
+export type SensorDocument = Sensor & Document;
+
+@Schema({ collection: 'sensors', timestamps: true, _id: false })
+export class Sensor {
+  @Prop({ _id: true, type: String })
+  _id: string; // sensor MAC (PK)
+
+  @Prop({ required: true })
+  mac: string;
+
+  /** Set only when user claims it */
+  @Prop({
+    type: Types.ObjectId,
+    ref: 'Organization',
+    default: null,
+    index: true,
+  })
+  orgId: Types.ObjectId | null;
+
+  /** True once the probe is claimed (derived flag) */
+  @Prop({ default: false })
+  claimed: boolean;
+
+  @Prop({ enum: SensorType })
+  type?: SensorType;
+
+  @Prop() unit?: string;
+
+  // dashboard helpers
+  @Prop() displayName?: string;
+  @Prop() lastValue?: number;
+  @Prop() lastUnit?: string;
+
+  @Prop({ default: Date.now })
+  firstSeen: Date;
+
+  @Prop() lastSeen?: Date;
+
+  @Prop({
+    type: [String], // gwId list
+    default: [],
+  })
+  lastSeenBy: string[];
+
+  @Prop({ default: false })
+  ignored: boolean;
+
+  @Prop({ default: false })
+  favorite: boolean;
+
+  @Prop({default: false})
+  isOnline: boolean;
+
+  @Prop({ default: 0 })
+  battery: number;
+}
+
+export const SensorSchema = SchemaFactory.createForClass(Sensor);
+
+SensorSchema.index({ mac: 1 }, { unique: true });
+SensorSchema.index({ mac: 'text', displayName: 'text' });
+
+# ======================
+# File: sensors/sensors.service.ts
+# ======================
+
+import { InjectModel } from '@nestjs/mongoose';
+import { Gateway, GatewayDocument } from '../gateways/gateways.schema';
+import { Types, Model } from 'mongoose';
+import { Sensor, SensorDocument } from './sensors.schema';
+import {
+  BadRequestException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
+import { UserRole } from '../users/enums/users.enum';
+import { ClaimSensorDto } from './dto/sensor.dto';
+import { Telemetry } from '../telemetry/telemetry.schema';
+import { SensorType } from './enums/sensor.enum';
+import { SettingsService } from '../settings/settings.service';
+
+@Injectable()
+export class SensorsService {
+  constructor(
+    @InjectModel(Sensor.name)
+    private readonly sensorModel: Model<SensorDocument>,
+    @InjectModel(Gateway.name) private readonly gwModel: Model<GatewayDocument>,
+    @InjectModel(Telemetry.name)
+    private readonly telemetryModel: Model<Telemetry>,
+    private readonly settingsService: SettingsService,
+  ) {}
+
+  /**
+   * Check and update sensor online status based on organization settings
+   */
+  private async calculateAndUpdateSensorOnlineStatus(sensors: any[], orgId: Types.ObjectId): Promise<void> {
+    try {
+      // Get the organization's settings
+      const settings = await this.settingsService.findByOrgId(orgId.toString());
+      
+      if (!settings || !settings.sensorOfflineTimeOut) {
+        // If no settings found or no timeout configured, skip the check
+        return;
+      }
+
+      const currentTime = new Date();
+      const timeoutMinutes = settings.sensorOfflineTimeOut;
+      const timeoutMs = timeoutMinutes * 60 * 1000; // Convert minutes to milliseconds
+
+      const sensorsToUpdate: { mac: string; isOnline: boolean }[] = [];
+
+      // First pass: Update the sensors array in memory and collect changes for DB
+      for (const sensor of sensors) {
+        if (!sensor.updatedAt) continue;
+
+        const lastUpdated = new Date(sensor.updatedAt);
+        const timeDifference = currentTime.getTime() - lastUpdated.getTime();
+        
+        // If time difference is greater than timeout, sensor should be offline
+        const shouldBeOnline = timeDifference <= timeoutMs;
+        
+        // Update the sensor object immediately for the response
+        if (sensor.isOnline !== shouldBeOnline) {
+          sensorsToUpdate.push({
+            mac: sensor.mac,
+            isOnline: shouldBeOnline
+          });
+          
+          // Update the sensor in memory immediately
+          sensor.isOnline = shouldBeOnline;
+        }
+      }
+
+      // Asynchronously update the database without blocking the response
+      if (sensorsToUpdate.length > 0) {
+        const bulkOps = sensorsToUpdate.map(({ mac, isOnline }) => ({
+          updateOne: {
+            filter: { mac },
+            update: { isOnline }
+          }
+        }));
+
+        // Fire and forget - don't await this to avoid blocking the response
+        this.sensorModel.bulkWrite(bulkOps).catch(error => {
+          console.error('Error updating sensor online status in database:', error);
+        });
+      }
+    } catch (error) {
+      // Log error but don't fail the entire request
+      console.error('Error checking sensor online status:', error);
+    }
+  }
+
+  /**
+   * Public method to manually check and update sensor online status for an organization
+   */
+  async updateSensorOnlineStatusForOrg(orgId: Types.ObjectId): Promise<{ updated: number }> {
+    try {
+      // Get all sensors for this organization
+      const sensors = await this.sensorModel
+        .find({
+          $or: [{ orgId }, { orgId: null }],
+          ignored: { $ne: true }
+        })
+        .lean();
+
+      if (sensors.length === 0) {
+        return { updated: 0 };
+      }
+
+      const initialLength = sensors.length;
+      await this.calculateAndUpdateSensorOnlineStatus(sensors, orgId);
+      
+      return { updated: initialLength };
+    } catch (error) {
+      console.error('Error updating sensor online status for org:', error);
+      throw error;
+    }
+  }
+
+  async getMeta(ids: string[]) {
+    const docs = await this.sensorModel
+      .find({ _id: { $in: ids } }, { mac: 1, type: 1, unit: 1 })
+      .lean();
+    return Object.fromEntries(docs.map((d) => [d._id, d]));
+  }
+
+  /** Return sensors for a gateway, scoped to caller’s org */
+  async paginateByGateway(
+    gatewayId: string,
+    callerOrg: Types.ObjectId,
+    { page, limit, claimed }: { page: number; limit: number; claimed?: string },
+  ) {
+    // reuse the ownership check once
+    (await this.gwModel.exists({ _id: gatewayId, orgId: callerOrg })) ||
+      (() => {
+        throw new NotFoundException('Gateway not found in your org');
+      })();
+
+    const base = {
+      lastSeenBy: gatewayId,
+      ignored: { $ne: true },
+      $or: [
+        { orgId: callerOrg }, // claimed by my org
+        { orgId: null }, // unclaimed but seen by my gw
+      ],
+    };
+
+    if (claimed !== undefined) base['claimed'] = claimed === 'true';
+
+    const total = await this.sensorModel.countDocuments(base);
+    const rows = await this.sensorModel
+      .find(base)
+      .sort({ lastSeen: -1 })
+      .skip((page - 1) * limit)
+      .limit(limit)
+      .lean();
+
+    // Check and update sensor online status based on settings
+    await this.calculateAndUpdateSensorOnlineStatus(rows, callerOrg);
+
+    return { rows, total };
+  }
+
+  async getAllSensors(
+    orgId: Types.ObjectId,
+    opts: {
+      page: number;
+      limit: number;
+      claimed?: string;
+      search?: string;
+      sort?: string;
+      dir?: 'asc' | 'desc';
+      type?: SensorType;
+    },
+  ) {
+    const { page, limit, claimed, search, sort, dir, type } = opts;
+
+    // 1. find all gateway IDs for this org
+    const gateways = await this.gwModel.find({ orgId }, { _id: 1 }).lean();
+    const gatewayIds = gateways.map((gw) => gw._id);
+
+    // 2. build the “base” query for sensors in those gateways
+    const base: any = {
+      ignored: { $ne: true },
+      // lastSeenBy: { $in: gatewayIds },
+      $or: [{ orgId }, { orgId: null }],
+      ...(type && { type }),
+    };
+
+    // 3. filter by claimed if provided
+    if (claimed !== undefined) {
+      base.claimed = claimed === 'true';
+    }
+
+    // 4. text‐index search if “search” is non‐empty
+    if (search?.trim()) {
+      // Use $text so Mongo uses the text index on { mac, displayName }
+      base.$text = { $search: search.trim() };
+    }
+
+    // 5. count total matching docs
+    const total = await this.sensorModel.countDocuments(base);
+
+    const sortField = sort || 'lastSeen';
+    const sortOrder = dir === 'asc' ? 1 : -1;
+
+    // For simplicity, if you don’t care about sorting by relevance, always sort on sortField:
+    const rows = await this.sensorModel
+      .find(base)
+      .sort({ [sortField]: sortOrder })
+      .skip((page - 1) * limit)
+      .limit(limit)
+      .lean();
+
+    // 7. populate lastValue (latest telemetry)
+    for (const sensor of rows as any) {
+      const lastReading = await this.telemetryModel
+        .findOne({ sensorId: sensor._id })
+        .sort({ ts: -1 })
+        .lean();
+      sensor.lastValue = lastReading?.value || 0;
+    }
+
+    // 8. Check and update sensor online status based on settings
+    await this.calculateAndUpdateSensorOnlineStatus(rows, orgId);
+
+    return { rows, total };
+  }
+
+  /**
+   * Attach a sensor (already discovered by Lambda) to the caller’s org
+   * and optionally set its display name.
+   *
+   * Rules:
+   *  • Sensor must exist and belong to one of the caller’s gateways.
+   *  • Caller’s org must match sensor.orgId.
+   */
+  async claimForUser(
+    caller: { orgId: Types.ObjectId; role: UserRole },
+    dto: ClaimSensorDto,
+  ) {
+    if (!caller.orgId)
+      throw new BadRequestException('You are not in an organization');
+
+    const sensor = await this.sensorModel.findOne({
+      _id: dto.mac.toUpperCase(),
+    });
+
+    if (!sensor) throw new NotFoundException('Sensor not discovered yet');
+
+    if (sensor.claimed && !sensor?.orgId?.equals(caller.orgId))
+      throw new BadRequestException('Sensor already claimed by another org');
+
+    /* 1️⃣ plan limit check (claimed probes only) */
+    const claimedCount = await this.sensorModel.countDocuments({
+      orgId: caller.orgId,
+      claimed: true,
+    });
+
+    const org = await this.gwModel.db
+      .collection('organizations')
+      .aggregate([
+        { $match: { _id: caller.orgId } },
+        {
+          $lookup: {
+            from: 'plans',
+            localField: 'planId',
+            foreignField: '_id',
+            as: 'plan',
+          },
+        },
+        { $unwind: '$plan' },
+        { $project: { maxSensors: '$plan.maxSensors' } },
+      ])
+      .next();
+
+    if (org && claimedCount >= org.maxSensors)
+      throw new BadRequestException('Sensor limit exceeded – upgrade plan.');
+
+    /* 2️⃣ first-time claim */
+    sensor.orgId = caller.orgId;
+    sensor.claimed = true;
+
+    // ignore flag stays untouched; nickname update is optional
+    if (dto.displayName) sensor.displayName = dto.displayName;
+    await sensor.save();
+
+    return sensor.toObject();
+  }
+
+  async getDetails(mac: string, orgId: Types.ObjectId) {
+    const s = await this.sensorModel
+      .findOne({
+        _id: mac,
+        ignored: { $ne: true },
+        $or: [{ orgId }, { orgId: null }],
+      })
+      .lean();
+    if (!s) throw new NotFoundException('Sensor not visible to your org');
+    
+    // Check and update sensor online status based on settings
+    await this.calculateAndUpdateSensorOnlineStatus([s], orgId);
+    
+    return s;
+  }
+
+  /** update nickname / other mutable props */
+  async updateSensor(
+    mac: string,
+    orgId: Types.ObjectId,
+    dto: { displayName?: string, isOnline?: boolean },
+  ) {
+    const s = await this.sensorModel.findOneAndUpdate(
+      { _id: mac, orgId },
+      { $set: { 
+        displayName: dto.displayName, 
+        ...(dto.isOnline !== undefined && { isOnline: dto.isOnline }),
+      } },
+      { new: true },
+    );
+    if (!s) throw new NotFoundException('Sensor not found in your org');
+    return s.toObject();
+  }
+
+  async addToFavorite(mac: string, orgId: Types.ObjectId) {
+    // if favorite already true, then make it false, else set to true
+    const existing = await this.sensorModel.findOne({ _id: mac, orgId });
+    if (!existing) throw new NotFoundException('Sensor not found in your org');
+    const s = await this.sensorModel.findOneAndUpdate(
+      { _id: mac, orgId },
+      { $set: { favorite: !existing.favorite } },
+    );
+    if (!s) throw new NotFoundException('Sensor not found in your org');
+    return s.toObject();
+  }
+
+  /** un-claim -> reset flags & scrub data link */
+  async unclaim(mac: string, orgId: Types.ObjectId) {
+    const upd = await this.sensorModel.findOneAndUpdate(
+      { _id: mac, orgId },
+      { $set: { orgId: null, claimed: false } },
+    );
+    if (!upd) throw new NotFoundException('Sensor not found or not yours');
+    return upd.toObject();
+  }
+
+  /** mini stats */
+  async getStats(orgId: Types.ObjectId) {
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const [claimed, unclaimed, liveSensors, offlineSensors] = await Promise.all(
+      [
+        this.sensorModel.countDocuments({ orgId, claimed: true }),
+        this.sensorModel.countDocuments({
+          orgId: null,
+          ignored: { $ne: true },
+        }),
+        this.sensorModel.countDocuments({ orgId, lastSeen: { $gte: today } }),
+        this.sensorModel.countDocuments({ orgId, lastSeen: { $lt: today } }),
+      ],
+    );
+
+    // crude avg seconds between points (could be refined)
+    const avgFreq = await this.sensorModel.aggregate([
+      { $match: { orgId, claimed: true, lastSeen: { $exists: true } } },
+      { $group: { _id: null, avg: { $avg: '$lastSeen' } } },
+    ]);
+
+    return {
+      claimed,
+      unclaimed,
+      liveSensors,
+      offlineSensors,
+      avgReadingFrequency: Math.round(avgFreq?.[0]?.avg ?? 0),
+    };
+  }
+}
+
+
+# ======================
+# File: sensors/sensors.module.ts
+# ======================
+
+import { Module } from '@nestjs/common';
+import { MongooseModule } from '@nestjs/mongoose';
+import { Sensor, SensorSchema } from './sensors.schema';
+import { SensorsService } from './sensors.service';
+import { SensorsController } from './sensors.controller';
+import { Gateway, GatewaySchema } from '../gateways/gateways.schema';
+import { UsersService } from '../users/users.service';
+import { User, UserSchema } from '../users/users.schema';
+import { Organization, OrganizationSchema } from '../organizations/organizations.schema';
+import { Telemetry, TelemetrySchema } from '../telemetry/telemetry.schema';
+import { SettingsModule } from '../settings/settings.module';
+
+@Module({
+  imports: [
+    MongooseModule.forFeature(
+      [
+        { name: Sensor.name, schema: SensorSchema },
+        { name: Gateway.name, schema: GatewaySchema },
+        { name: User.name, schema: UserSchema },
+        { name: Organization.name, schema: OrganizationSchema },
+        { name: Telemetry.name, schema: TelemetrySchema },
+      ]
+    ),
+    SettingsModule,
+  ],
+  providers: [SensorsService, UsersService],
+  controllers: [SensorsController],
+  exports: [MongooseModule],
+})
+export class SensorsModule {}
+
+
+# ======================
+# File: sensors/sensors.controller.ts
+# ======================
+
+import {
+  Body,
+  Controller,
+  Get,
+  Param,
+  Patch,
+  Post,
+  Query,
+  Req,
+  UseGuards,
+} from '@nestjs/common';
+import { JwtAuthGuard } from '../auth/jwt-auth.guard';
+import { RolesGuard } from '../auth/roles.guard';
+import { PermissionGuard } from '../auth/permission.guard';
+import { RequiredPermissions } from '../auth/permission.guard';
+import { OrgContextGuard } from '../../auth/org-context.guard';
+import { PERMISSIONS } from '../../common/constants/permissions';
+import { SensorsService } from './sensors.service';
+import { plainToInstance } from 'class-transformer';
+import { ClaimSensorDto, SensorResponseDto } from './dto/sensor.dto';
+import { Public } from '../auth/public.decorator';
+import { Roles } from '../auth/roles.decorator';
+import { UserRole } from '../users/enums/users.enum';
+import { normLimit, normPage } from 'src/common/utils/pagination';
+import { SensorType } from './enums/sensor.enum';
+import { OrgContextUser } from '../../auth/org-context.guard';
+import { ObjectId } from 'mongodb';
+
+@Controller('sensors')
+@UseGuards(JwtAuthGuard, OrgContextGuard)
+export class SensorsController {
+  constructor(private readonly svc: SensorsService) {}
+
+  /** GET /sensors/by-gateway/:gatewayId */
+  @UseGuards(PermissionGuard)
+  @RequiredPermissions(PERMISSIONS.SENSORS.VIEW)
+  @Get('by-gateway/:gatewayId')
+  async listByGateway(
+    @Param('gatewayId') gatewayId: string,
+    @Query() q: { page?: string; limit?: string; claimed?: string },
+    @Req() req: { user: OrgContextUser },
+  ) {
+    const page = normPage(q);
+    const limit = normLimit(q, 50);
+
+    const { rows, total } = await this.svc.paginateByGateway(
+      gatewayId,
+      new ObjectId(req.user.orgId!),
+      { page, limit, claimed: q.claimed },
+    );
+
+    return {
+      data: plainToInstance(SensorResponseDto, rows, {
+        excludeExtraneousValues: true,
+      }),
+      pagination: {
+        total,
+        page,
+        limit,
+        totalPages: Math.ceil(total / limit),
+      },
+    };
+  }
+
+  /** GET /sensors   – all sensors in my organization (paginated) */
+  @UseGuards(PermissionGuard)
+  @RequiredPermissions(PERMISSIONS.SENSORS.VIEW)
+  @Get()
+  async listAllMine(
+    @Query()
+    q: {
+      page?: string;
+      limit?: string;
+      claimed?: string;
+      q?: string; // search
+      sort?: string; // field
+      dir?: 'asc' | 'desc';
+      type?: SensorType,
+    },
+    @Req() req: any,
+  ) {
+    const page = normPage(q);
+    const limit = normLimit(q, 50);
+
+    const { rows, total } = await this.svc.getAllSensors(req.user.orgId, {
+      page,
+      limit,
+      claimed: q.claimed,
+      search: q.q,
+      sort: q.sort,
+      dir: q.dir,
+      type: q?.type,
+    });
+
+    return {
+      // data: plainToInstance(SensorResponseDto, rows, {
+      //   excludeExtraneousValues: true,
+      // }),
+      data: rows,
+      pagination: { total, page, limit, totalPages: Math.ceil(total / limit) },
+    };
+  }
+
+  /** POST /sensors/claim */
+  @UseGuards(PermissionGuard)
+  @RequiredPermissions(PERMISSIONS.SENSORS.CREATE)
+  @Post('claim')
+  async claim(@Req() req: { user: OrgContextUser }, @Body() dto: ClaimSensorDto) {
+    return this.svc.claimForUser(
+      { orgId: new ObjectId(req.user.orgId!), role: req.user.role as UserRole },
+      dto,
+    );
+  }
+
+  /** GET /sensors/stats  – simple dashboard card */
+  @UseGuards(PermissionGuard)
+  @RequiredPermissions(PERMISSIONS.SENSORS.VIEW)
+  @Get('stats')
+  getStats(@Req() req: { user: OrgContextUser }) {
+    return this.svc.getStats(new ObjectId(req.user.orgId!));
+  }
+
+  @UseGuards(PermissionGuard)
+  @RequiredPermissions(PERMISSIONS.SENSORS.VIEW)
+  @Get(':mac')
+  async getOne(@Param('mac') mac: string, @Req() req: { user: OrgContextUser }) {
+    return this.svc.getDetails(mac.toUpperCase(), new ObjectId(req.user.orgId!));
+  }
+
+  /** PATCH /sensors/:mac – rename / toggle fields (currently label only) */
+  @UseGuards(PermissionGuard)
+  @RequiredPermissions(PERMISSIONS.SENSORS.UPDATE)
+  @Patch(':mac')
+  updateSensor(
+    @Param('mac') mac: string,
+    @Req() req: { user: OrgContextUser },
+    @Body() dto: { displayName?: string, isOnline?: boolean },
+  ) {
+    return this.svc.updateSensor(mac.toUpperCase(), new ObjectId(req.user.orgId!), dto);
+  }
+
+  @UseGuards(PermissionGuard)
+  @RequiredPermissions(PERMISSIONS.SENSORS.UPDATE)
+  @Post(':mac/favorite')
+  addToFavorite(
+    @Param('mac') mac: string,
+    @Req() req: { user: OrgContextUser },
+  ) {
+    return this.svc.addToFavorite(mac.toUpperCase(), new ObjectId(req.user.orgId!));
+  }
+
+  /** POST /sensors/:mac/claim   */
+  @UseGuards(PermissionGuard)
+  @RequiredPermissions(PERMISSIONS.SENSORS.CREATE)
+  @Post(':mac/claim')
+  claimSensor(
+    @Param('mac') mac: string,
+    @Req() req: { user: OrgContextUser },
+    @Body('displayName') displayName?: string,
+  ) {
+    return this.svc.claimForUser(
+      { orgId: new ObjectId(req.user.orgId!), role: req.user.role as UserRole },
+      { mac, displayName },
+    );
+  }
+
+  /** POST /sensors/:mac/unclaim  */
+  @UseGuards(PermissionGuard)
+  @RequiredPermissions(PERMISSIONS.SENSORS.DELETE)
+  @Post(':mac/unclaim')
+  unclaimSensor(@Param('mac') mac: string, @Req() req: { user: OrgContextUser }) {
+    return this.svc.unclaim(mac.toUpperCase(), new ObjectId(req.user.orgId!));
+  }
+}
+
+
+# ======================
+# File: sensors/dto/sensor.dto.ts
+# ======================
+
+import {
+  IsBoolean,
+  IsEnum,
+  IsMACAddress,
+  IsMongoId,
+  IsOptional,
+  IsString,
+  Matches,
+} from 'class-validator';
+import { SensorType } from '../enums/sensor.enum';
+import { Expose, Transform } from 'class-transformer';
+
+export class CreateSensorDto {
+  /** MAC becomes the Mongo _id */
+  @IsString()
+  _id: string;
+
+  @IsString()
+  mac: string;
+
+  @IsMongoId()
+  @IsOptional()
+  orgId?: string;
+
+  @IsOptional()
+  @IsEnum(SensorType)
+  type?: SensorType;
+
+  @IsOptional()
+  @IsString()
+  unit?: string;
+
+  // dashboard helpers
+  @IsOptional()
+  @IsString()
+  displayName?: string;
+
+  @IsOptional()
+  lastValue?: number;
+
+  @IsOptional()
+  @IsString()
+  lastUnit?: string;
+
+  @IsBoolean()
+  ignored: boolean;
+}
+
+export class UpdateSensorDto extends CreateSensorDto {}
+
+export class SensorResponseDto {
+  @Expose()
+  _id: string;
+
+  @Expose()
+  mac: string;
+
+  @Expose()
+  type?: SensorType;
+
+  @Expose()
+  unit?: string;
+
+  @Expose()
+  displayName?: string;
+
+  @Expose()
+  lastValue?: number;
+
+  @Expose()
+  lastUnit?: string;
+
+  @Expose()
+  lastSeenBy?: string[];
+
+  @Expose()
+  lastSeen?: Date;
+
+  @Expose()
+  claimed: boolean;
+
+  @Expose()
+  ignored: boolean;
+
+  @Expose()
+  createdAt: Date;
+
+  /** strip Mongo internals */
+  @Transform(() => undefined, { toPlainOnly: true })
+  __v?: never;
+
+  @Transform(() => undefined, { toPlainOnly: true })
+  updatedAt?: never;
+}
+
+/** Body payload for POST /sensors/claim */
+export class ClaimSensorDto {
+  /** Printed on the probe label */
+  @Matches(/^([0-9A-F]{2}:){3,5}[0-9A-F]{2}$/i, {
+    message: 'mac must be 4-octet or 6-octet colon-separated hex',
+  })
+  mac!: string;
+
+  /** Optional friendly name that shows up in dashboards */
+  @IsOptional()
+  @IsString()
+  displayName?: string;
+}
+
+
+# ======================
+# File: sensors/enums/sensor.enum.ts
+# ======================
+
+export enum SensorType {
+  TEMP     = 'temperature',
+  HUMIDITY = 'humidity',
+  PRESSURE = 'pressure',
+  ACCEL    = 'accelerometer',
+  CO2      = 'co2',
+  LIGHT    = 'light',
+  MOTION   = 'motion',
+  UNKNOWN  = 'unknown',
+  GENERIC  = 'generic',
+  BATTERY  = 'battery',
+}
+
+
+# ======================
+# File: auth/roles.guard.ts
+# ======================
+
+import {
+  CanActivate,
+  ExecutionContext,
+  Injectable,
+  ForbiddenException,
+} from '@nestjs/common';
+import { Reflector } from '@nestjs/core';
+import { UserRole } from '../users/enums/users.enum';
+import { OrgContextUser } from '../../auth/org-context.guard';
+
+@Injectable()
+export class RolesGuard implements CanActivate {
+  constructor(private reflector: Reflector) {}
+
+  async canActivate(ctx: ExecutionContext): Promise<boolean> {
+    const requiredRoles =
+      this.reflector.get<UserRole[]>('roles', ctx.getHandler()) ?? [];
+
+    if (requiredRoles.length === 0) return true; // no role restriction
+
+    const request = ctx.switchToHttp().getRequest();
+    const user = request.user as OrgContextUser;
+    
+    if (!user?.role) {
+      throw new ForbiddenException('No organization context or role found');
+    }
+
+    const hasRole = requiredRoles.includes(user.role as UserRole);
+    if (!hasRole) {
+      throw new ForbiddenException(
+        `Insufficient role. Required: ${requiredRoles.join(' or ')}, Have: ${user.role}`
+      );
+    }
+
+    return true;
+  }
+}
+
+
+# ======================
+# File: auth/jwt.strategy.ts
+# ======================
+
+import { PassportStrategy } from '@nestjs/passport';
+import { Strategy, ExtractJwt } from 'passport-jwt';
+import * as jwksRsa from 'jwks-rsa';
+import { ConfigService } from '@nestjs/config';
+import { Injectable } from '@nestjs/common';
+import { UsersService } from '../users/users.service';
+
+@Injectable()
+export class JwtStrategy extends PassportStrategy(Strategy) {
+  constructor(cfg: ConfigService, private usersSvc: UsersService) {
+    const region = cfg.get<string>('cognito.region');
+    const poolId = cfg.get<string>('cognito.userPoolId');
+    const issuer = `https://cognito-idp.${region}.amazonaws.com/${poolId}`;
+
+    super({
+      issuer,
+      algorithms: ['RS256'],
+      secretOrKeyProvider: jwksRsa.passportJwtSecret({
+        jwksUri: `${issuer}/.well-known/jwks.json`,
+        cache: true,
+        cacheMaxAge: 10 * 60 * 1000,
+      }),
+      jwtFromRequest: ExtractJwt.fromAuthHeaderAsBearerToken(),
+    });
+  }
+
+  /* This runs on every request after JWT is verified */
+  async validate(payload: any) {
+    const user = await this.usersSvc.findOrCreateFromToken({
+      sub: payload.sub,
+      email: payload.email,
+    }) as any;
+    
+    /* Return minimal user info - org context will be resolved by OrgContextGuard */
+    return {
+      userId: user._id.toString(),   
+      sub: payload.sub,
+      email: payload.email,
+      role: user?.role,
+      orgId: user?.orgId,
+    };
+  }
+}
+
+
+# ======================
+# File: auth/jwt-auth.guard.ts
+# ======================
+
+import { ExecutionContext, Injectable } from '@nestjs/common';
+import { AuthGuard } from '@nestjs/passport';
+import { Reflector } from '@nestjs/core';
+import { Observable } from 'rxjs';
+
+@Injectable()
+export class JwtAuthGuard extends AuthGuard('jwt') {
+  constructor(private reflector: Reflector) {
+    super();
+  }
+
+  // Make guard skip routes marked @Public()
+  override canActivate(
+    ctx: ExecutionContext,
+  ): boolean | Promise<boolean> | Observable<boolean> {
+    const isPublic = this.reflector.get<boolean>('isPublic', ctx.getHandler());
+    if (isPublic) return true;
+    return super.canActivate(ctx);
+  }
+}
+
+
+# ======================
+# File: auth/roles.decorator.ts
+# ======================
+
+import { SetMetadata } from '@nestjs/common';
+import { UserRole } from '../users/enums/users.enum';
+
+export const Roles = (...roles: UserRole[]) => SetMetadata('roles', roles);
+
+
+# ======================
+# File: auth/permission.guard.ts
+# ======================
+
+import {
+  CanActivate,
+  ExecutionContext,
+  Injectable,
+  ForbiddenException,
+  SetMetadata,
+} from '@nestjs/common';
+import { Reflector } from '@nestjs/core';
+import { OrgContextUser } from '../../auth/org-context.guard';
+
+export const REQUIRED_PERMISSIONS_KEY = 'requiredPermissions';
+
+/**
+ * Decorator to specify required permissions for an endpoint
+ * @param permissions - Array of permission strings required (ALL must be present - AND logic)
+ * @example @RequiredPermissions(PERMISSIONS.SENSORS.VIEW, PERMISSIONS.SENSORS.CREATE)
+ */
+export const RequiredPermissions = (...permissions: string[]) =>
+  SetMetadata(REQUIRED_PERMISSIONS_KEY, permissions);
+
+/**
+ * Decorator to specify that user needs ANY of the specified permissions (OR logic)
+ * @param permissions - Array of permission strings (ANY can be present)
+ * @example @RequiredAnyPermissions(PERMISSIONS.SENSORS.VIEW, PERMISSIONS.GATEWAYS.VIEW)
+ */
+export const REQUIRED_ANY_PERMISSIONS_KEY = 'requiredAnyPermissions';
+export const RequiredAnyPermissions = (...permissions: string[]) =>
+  SetMetadata(REQUIRED_ANY_PERMISSIONS_KEY, permissions);
+
+@Injectable()
+export class PermissionGuard implements CanActivate {
+  constructor(private reflector: Reflector) {}
+
+  async canActivate(context: ExecutionContext): Promise<boolean> {
+    const requiredPermissions = this.reflector.getAllAndOverride<string[]>(
+      REQUIRED_PERMISSIONS_KEY,
+      [context.getHandler(), context.getClass()],
+    );
+
+    const requiredAnyPermissions = this.reflector.getAllAndOverride<string[]>(
+      REQUIRED_ANY_PERMISSIONS_KEY,
+      [context.getHandler(), context.getClass()],
+    );
+
+    if ((!requiredPermissions || requiredPermissions.length === 0) && 
+        (!requiredAnyPermissions || requiredAnyPermissions.length === 0)) {
+      return true; // No permission requirements
+    }
+
+    const request = context.switchToHttp().getRequest();
+    const user = request.user as OrgContextUser;
+
+    if (!user?.permissions || user.permissions.length === 0) {
+      throw new ForbiddenException('No organization context or permissions found');
+    }
+
+    // Check ALL required permissions (AND logic)
+    if (requiredPermissions && requiredPermissions.length > 0) {
+      const hasAllPermissions = requiredPermissions.every(permission =>
+        user.permissions!.includes(permission)
+      );
+
+      if (!hasAllPermissions) {
+        const missingPermissions = requiredPermissions.filter(
+          permission => !user.permissions!.includes(permission)
+        );
+        
+        throw new ForbiddenException(
+          `Insufficient permissions. Missing: ${missingPermissions.join(', ')}`
+        );
+      }
+    }
+
+    // Check ANY required permissions (OR logic)
+    if (requiredAnyPermissions && requiredAnyPermissions.length > 0) {
+      const hasAnyPermission = requiredAnyPermissions.some(permission =>
+        user.permissions!.includes(permission)
+      );
+
+      if (!hasAnyPermission) {
+        throw new ForbiddenException(
+          `Insufficient permissions. Need any of: ${requiredAnyPermissions.join(', ')}`
+        );
+      }
+    }
+
+    return true;
+  }
+}
+
+
+# ======================
+# File: auth/auth.module.ts
+# ======================
+
+import { Module } from '@nestjs/common';
+import { PassportModule } from '@nestjs/passport';
+import { JwtStrategy } from './jwt.strategy';
+import { UsersModule } from '../users/users.module';
+import { MembershipsModule } from '../memberships/memberships.module';
+import { OrgContextGuard } from '../../auth/org-context.guard';
+
+@Module({
+  imports: [PassportModule, UsersModule, MembershipsModule],
+  providers: [JwtStrategy, OrgContextGuard],
+  exports: [OrgContextGuard],
+})
+export class AuthModule {}
+
+
+# ======================
+# File: auth/public.decorator.ts
+# ======================
+
+import { SetMetadata } from '@nestjs/common';
+/** Skip all auth guards */
+export const Public = () => SetMetadata('isPublic', true);
+
+# ======================
+# File: mail/mail.module.ts
+# ======================
+
+import { Module } from '@nestjs/common';
+import { MailService } from './mail.service';
+
+@Module({
+  providers: [MailService],
+  exports: [MailService],
+})
+export class MailModule {}
+
+
+# ======================
+# File: mail/mail.service.ts
+# ======================
+
+import { Injectable, Logger } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
+import { SESv2Client, SendEmailCommand } from '@aws-sdk/client-sesv2';
+
+export interface InviteEmailData {
+  orgName: string;
+  role: string;
+  inviteUrl: string;
+  expiresAt: string;
+  inviterName?: string;
+}
+
+@Injectable()
+export class MailService {
+  private readonly logger = new Logger(MailService.name);
+  private readonly sesClient: SESv2Client;
+  private readonly fromEmail: string;
+  private readonly configSet?: string;
+
+  constructor(private readonly config: ConfigService) {
+    const region = this.config.get('ses.region') || this.config.get('aws.region');
+    this.fromEmail = this.config.get('ses.fromEmail') || 'noreply@motionics.com';
+    this.configSet = this.config.get('ses.configSet');
+    
+    // TODO: SES client initialization temporarily disabled for testing
+    // Uncomment when SES is properly configured
+    // this.sesClient = new SESv2Client({
+    //   region,
+    //   // AWS SDK will automatically pick up credentials from environment
+    // });
+    
+    this.logger.log('MailService initialized (SES disabled for testing)');
+  }
+
+  /**
+   * Send invite email using SES template
+   */
+  async sendInviteEmail(
+    to: string,
+    templateName: string,
+    templateData: InviteEmailData
+  ): Promise<string> {
+    // TODO: Email sending temporarily disabled for testing
+    // Uncomment when SES is properly configured
+    this.logger.log(`[MOCK] Would send invite email to ${to} with template ${templateName}`);
+    this.logger.log(`[MOCK] Template data:`, templateData);
+    
+    // Return mock message ID for testing
+    return `mock-message-id-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+    
+    /* Uncomment when SES is configured:
+    try {
+      const command = new SendEmailCommand({
+        FromEmailAddress: this.fromEmail,
+        Destination: {
+          ToAddresses: [to],
+        },
+        Content: {
+          Template: {
+            TemplateName: templateName,
+            TemplateData: JSON.stringify(templateData),
+          },
+        },
+        ConfigurationSetName: this.configSet,
+      });
+
+      const response = await this.sesClient.send(command);
+      this.logger.log(`Email sent successfully to ${to}, MessageId: ${response.MessageId}`);
+      
+      return response.MessageId || '';
+    } catch (error) {
+      this.logger.error(`Failed to send email to ${to}:`, error);
+      throw error;
+    }
+    */
+  }
+
+  /**
+   * Send simple email without template
+   */
+  async sendSimpleEmail(
+    to: string,
+    subject: string,
+    htmlBody: string,
+    textBody?: string
+  ): Promise<string> {
+    // TODO: Email sending temporarily disabled for testing
+    // Uncomment when SES is properly configured
+    this.logger.log(`[MOCK] Would send simple email to ${to} with subject: ${subject}`);
+    this.logger.log(`[MOCK] HTML body length: ${htmlBody.length} chars`);
+    
+    // Return mock message ID for testing
+    return `mock-simple-email-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+    
+    /* Uncomment when SES is configured:
+    try {
+      const command = new SendEmailCommand({
+        FromEmailAddress: this.fromEmail,
+        Destination: {
+          ToAddresses: [to],
+        },
+        Content: {
+          Simple: {
+            Subject: {
+              Data: subject,
+              Charset: 'UTF-8',
+            },
+            Body: {
+              Html: {
+                Data: htmlBody,
+                Charset: 'UTF-8',
+              },
+              ...(textBody && {
+                Text: {
+                  Data: textBody,
+                  Charset: 'UTF-8',
+                },
+              }),
+            },
+          },
+        },
+        ConfigurationSetName: this.configSet,
+      });
+
+      const response = await this.sesClient.send(command);
+      this.logger.log(`Simple email sent successfully to ${to}, MessageId: ${response.MessageId}`);
+      
+      return response.MessageId || '';
+    } catch (error) {
+      this.logger.error(`Failed to send simple email to ${to}:`, error);
+      throw error;
+    }
+    */
+  }
+
+  /**
+   * Generate invite email HTML (fallback if no template)
+   */
+  generateInviteEmailHtml(data: InviteEmailData): string {
+    return `
+      <!DOCTYPE html>
+      <html>
+      <head>
+        <meta charset="utf-8">
+        <title>You're invited to join ${data.orgName}</title>
+      </head>
+      <body style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
+        <h2>You're invited to join ${data.orgName}</h2>
+        <p>Hello,</p>
+        <p>You've been invited to join <strong>${data.orgName}</strong> as a <strong>${data.role}</strong>.</p>
+        ${data.inviterName ? `<p>This invitation was sent by ${data.inviterName}.</p>` : ''}
+        <p>Click the button below to accept your invitation:</p>
+        <div style="text-align: center; margin: 30px 0;">
+          <a href="${data.inviteUrl}" 
+             style="background-color: #007bff; color: white; padding: 12px 24px; text-decoration: none; border-radius: 4px; display: inline-block;">
+            Accept Invitation
+          </a>
+        </div>
+        <p><strong>This invitation expires on ${data.expiresAt}.</strong></p>
+        <p>If you don't want to join this organization, you can ignore this email.</p>
+        <hr style="margin: 30px 0; border: none; border-top: 1px solid #eee;">
+        <p style="color: #666; font-size: 12px;">
+          If the button doesn't work, copy and paste this link into your browser:<br>
+          ${data.inviteUrl}
+        </p>
+      </body>
+      </html>
+    `;
+  }
+}
+
+
+# ======================
+# File: memberships/memberships.schema.ts
+# ======================
+
+import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
+import { Document, Types } from 'mongoose';
+import { UserRole } from '../users/enums/users.enum';
+
+export type MembershipDocument = Membership & Document;
+
+export enum MembershipStatus {
+  ACTIVE = 'ACTIVE',
+  INVITED = 'INVITED',
+  SUSPENDED = 'SUSPENDED',
+}
+
+@Schema({ collection: 'memberships', timestamps: true })
+export class Membership {
+  @Prop({ type: Types.ObjectId, ref: 'User', required: true })
+  userId: Types.ObjectId;
+
+  @Prop({ type: Types.ObjectId, ref: 'Organization', required: true })
+  orgId: Types.ObjectId;
+
+  @Prop({ enum: UserRole, default: UserRole.MEMBER })
+  role: UserRole;
+
+  @Prop({ type: [String], default: [] })
+  allow: string[];
+
+  @Prop({ type: [String], default: [] })
+  deny: string[];
+
+  @Prop({ enum: MembershipStatus, default: MembershipStatus.ACTIVE })
+  status: MembershipStatus;
+
+  @Prop({ type: Types.ObjectId, ref: 'User' })
+  invitedBy?: Types.ObjectId;
+
+  @Prop()
+  invitedAt?: Date;
+
+  @Prop()
+  acceptedAt?: Date;
+}
+
+export const MembershipSchema = SchemaFactory.createForClass(Membership);
+
+// Indexes
+MembershipSchema.index({ userId: 1, orgId: 1 }, { unique: true });
+MembershipSchema.index({ orgId: 1, status: 1 });
+MembershipSchema.index({ userId: 1, status: 1 });
+
+
+# ======================
+# File: memberships/memberships.module.ts
+# ======================
+
+import { Module } from '@nestjs/common';
+import { MongooseModule } from '@nestjs/mongoose';
+import { Membership, MembershipSchema } from './memberships.schema';
+import { User, UserSchema } from '../users/users.schema';
+import { Organization, OrganizationSchema } from '../organizations/organizations.schema';
+import { MembershipsService } from './memberships.service';
+import { MembershipsController } from './memberships.controller';
+
+@Module({
+  imports: [
+    MongooseModule.forFeature([
+      { name: Membership.name, schema: MembershipSchema },
+      { name: User.name, schema: UserSchema },
+      { name: Organization.name, schema: OrganizationSchema },
+    ]),
+  ],
+  controllers: [MembershipsController],
+  providers: [MembershipsService],
+  exports: [MongooseModule, MembershipsService],
+})
+export class MembershipsModule {}
+
+
+# ======================
+# File: memberships/memberships.controller.ts
+# ======================
+
+import {
+  Controller,
+  Get,
+  Patch,
+  Delete,
+  Param,
+  Body,
+  Query,
+  Req,
+  UseGuards,
+  HttpCode,
+  HttpStatus,
+  ParseIntPipe,
+  DefaultValuePipe,
+} from '@nestjs/common';
+import { JwtAuthGuard } from '../auth/jwt-auth.guard';
+import { OrgContextGuard } from '../../auth/org-context.guard';
+import { RolesGuard } from '../auth/roles.guard';
+import { Roles } from '../auth/roles.decorator';
+import { UserRole } from '../users/enums/users.enum';
+import { MembershipsService } from './memberships.service';
+import { OrgContextUser } from '../../auth/org-context.guard';
+import {
+  UpdateMembershipRoleDto,
+  UpdateMembershipPermissionsDto,
+  PaginationQueryDto,
+} from './dto/membership.dto';
+
+@Controller('organizations/:orgId/members')
+@UseGuards(JwtAuthGuard, OrgContextGuard, RolesGuard)
+export class MembershipsController {
+  constructor(private readonly membershipsService: MembershipsService) {}
+
+  /**
+   * Get members of an organization
+   */
+  @Get()
+  @Roles(UserRole.OWNER, UserRole.ADMIN)
+  async getMembers(
+    @Param('orgId') orgId: string,
+    @Query() query: PaginationQueryDto
+  ) {
+    try {
+      const options = {
+        page: query.page ? parseInt(query.page, 10) : 1,
+        limit: query.limit ? parseInt(query.limit, 10) : 20,
+        search: query.search || '',
+        sort: query.sort || 'createdAt',
+        dir: query.dir || 'desc' as 'asc' | 'desc',
+      };
+
+      return await this.membershipsService.getOrgMembers(orgId, options);
+    } catch (error) {
+      throw error;
+    }
+  }
+
+  /**
+   * Update member role
+   */
+  @Patch(':membershipId/role')
+  @Roles(UserRole.OWNER, UserRole.ADMIN)
+  @HttpCode(HttpStatus.OK)
+  async updateRole(
+    @Param('membershipId') membershipId: string,
+    @Body() dto: UpdateMembershipRoleDto
+  ) {
+    try {
+      const membership = await this.membershipsService.updateRole(membershipId, dto);
+      return {
+        message: 'Member role updated successfully',
+        membership: {
+          id: (membership as any)._id,
+          role: membership.role,
+        },
+      };
+    } catch (error) {
+      throw error;
+    }
+  }
+
+  /**
+   * Update member permissions
+   */
+  @Patch(':membershipId/permissions')
+  @Roles(UserRole.OWNER, UserRole.ADMIN)
+  @HttpCode(HttpStatus.OK)
+  async updatePermissions(
+    @Param('membershipId') membershipId: string,
+    @Body() dto: UpdateMembershipPermissionsDto
+  ) {
+    try {
+      const membership = await this.membershipsService.updatePermissions(membershipId, dto);
+      return {
+        message: 'Member permissions updated successfully',
+        membership: {
+          id: (membership as any)._id,
+          allow: membership.allow,
+          deny: membership.deny,
+        },
+      };
+    } catch (error) {
+      throw error;
+    }
+  }
+
+  /**
+   * Remove member from organization
+   */
+  @Delete(':membershipId')
+  @Roles(UserRole.OWNER, UserRole.ADMIN)
+  @HttpCode(HttpStatus.NO_CONTENT)
+  async removeMember(
+    @Param('membershipId') membershipId: string,
+    @Req() req: { user: OrgContextUser }
+  ) {
+    try {
+      await this.membershipsService.removeMember(membershipId, req.user.userId);
+    } catch (error) {
+      throw error;
+    }
+  }
+}
+
+
+# ======================
+# File: memberships/memberships.service.ts
+# ======================
+
+import {
+  Injectable,
+  NotFoundException,
+  BadRequestException,
+  ConflictException,
+  ForbiddenException,
+  HttpException,
+} from '@nestjs/common';
+import { InjectModel } from '@nestjs/mongoose';
+import { Model, Types } from 'mongoose';
+import { Membership, MembershipDocument, MembershipStatus } from './memberships.schema';
+import { User, UserDocument } from '../users/users.schema';
+import { Organization, OrganizationDocument } from '../organizations/organizations.schema';
+import { UserRole } from '../users/enums/users.enum';
+import { computeEffectivePermissions } from '../../common/constants/permissions';
+
+export interface CreateMembershipDto {
+  userId: string;
+  orgId: string;
+  role?: UserRole;
+  allow?: string[];
+  deny?: string[];
+  status?: MembershipStatus;
+  invitedBy?: string;
+}
+
+export interface UpdateMembershipRoleDto {
+  role: UserRole;
+}
+
+export interface UpdateMembershipPermissionsDto {
+  allow: string[];
+  deny: string[];
+}
+
+export interface MembershipWithUser {
+  _id: string;
+  userId: string;
+  orgId: string;
+  role: UserRole;
+  allow: string[];
+  deny: string[];
+  status: MembershipStatus;
+  invitedBy?: string;
+  invitedAt?: Date;
+  acceptedAt?: Date;
+  createdAt: Date;
+  updatedAt: Date;
+  user: {
+    email: string;
+    displayName?: string;
+  };
+  permissions: string[];
+}
+
+export interface PaginationOptions {
+  page?: number;
+  limit?: number;
+  search?: string;
+  sort?: string;
+  dir?: 'asc' | 'desc';
+}
+
+export interface PaginatedResult<T> {
+  data: T[];
+  pagination: {
+    page: number;
+    limit: number;
+    total: number;
+    totalPages: number;
+  };
+}
+
+@Injectable()
+export class MembershipsService {
+  constructor(
+    @InjectModel(Membership.name) private membershipModel: Model<MembershipDocument>,
+    @InjectModel(User.name) private userModel: Model<UserDocument>,
+    @InjectModel(Organization.name) private orgModel: Model<OrganizationDocument>,
+  ) {}
+
+  /**
+   * Create a new membership
+   */
+  async create(dto: CreateMembershipDto): Promise<Membership> {
+    try {
+      // Validate user and org exist
+      const [user, org] = await Promise.all([
+        this.userModel.findById(dto.userId).lean(),
+        this.orgModel.findById(dto.orgId).lean(),
+      ]);
+
+      if (!user) {
+        throw new NotFoundException('User not found');
+      }
+      if (!org) {
+        throw new NotFoundException('Organization not found');
+      }
+
+      // Check if membership already exists
+      const existing = await this.membershipModel
+        .findOne({ userId: dto.userId, orgId: dto.orgId })
+        .lean();
+
+      if (existing) {
+        throw new ConflictException({
+          status: 409,
+          code: 'MEMBERSHIP_EXISTS',
+          message: 'User is already a member of this organization',
+        });
+      }
+
+      // Enforce: only one OWNER per org
+      if (dto.role === UserRole.OWNER) {
+        const existingOwner = await this.membershipModel
+          .findOne({ orgId: dto.orgId, role: UserRole.OWNER })
+          .lean();
+
+        if (existingOwner) {
+          throw new BadRequestException('Organization already has an owner');
+        }
+      }
+
+      const membership = new this.membershipModel({
+        userId: new Types.ObjectId(dto.userId),
+        orgId: new Types.ObjectId(dto.orgId),
+        role: dto.role || UserRole.MEMBER,
+        allow: dto.allow || [],
+        deny: dto.deny || [],
+        status: dto.status || MembershipStatus.ACTIVE,
+        ...(dto.invitedBy && { invitedBy: new Types.ObjectId(dto.invitedBy) }),
+        ...(dto.status === MembershipStatus.INVITED && { invitedAt: new Date() }),
+        ...(dto.status === MembershipStatus.ACTIVE && { acceptedAt: new Date() }),
+      });
+
+      return await membership.save();
+    } catch (error) {
+      if (error instanceof HttpException) {
+        throw error;
+      }
+      throw new BadRequestException('Failed to create membership');
+    }
+  }
+
+  /**
+   * Get members of an organization with pagination
+   */
+  async getOrgMembers(
+    orgId: string,
+    options: PaginationOptions = {}
+  ): Promise<PaginatedResult<MembershipWithUser>> {
+    try {
+      const {
+        page = 1,
+        limit = 20,
+        search = '',
+        sort = 'createdAt',
+        dir = 'desc',
+      } = options;
+
+      const skip = (page - 1) * limit;
+      const sortObj: any = { [sort]: dir === 'asc' ? 1 : -1 };
+
+      // Build search filter
+      let searchFilter = {};
+      if (search) {
+        const users = await this.userModel
+          .find({
+            $or: [
+              { email: { $regex: search, $options: 'i' } },
+              { displayName: { $regex: search, $options: 'i' } },
+            ],
+          })
+          .select('_id')
+          .lean();
+
+        const userIds = users.map(u => u._id);
+        searchFilter = { userId: { $in: userIds } };
+      }
+
+      const filter = {
+        orgId: new Types.ObjectId(orgId),
+        ...searchFilter,
+      };
+
+      const [memberships, total] = await Promise.all([
+        this.membershipModel
+          .find(filter)
+          .populate('userId', 'email displayName')
+          .sort(sortObj)
+          .skip(skip)
+          .limit(limit)
+          .lean(),
+        this.membershipModel.countDocuments(filter),
+      ]);
+
+      const data = memberships.map((membership: any) => ({
+        _id: membership._id.toString(),
+        userId: membership.userId._id.toString(),
+        orgId: membership.orgId.toString(),
+        role: membership.role,
+        allow: membership.allow,
+        deny: membership.deny,
+        status: membership.status,
+        invitedBy: membership.invitedBy?.toString(),
+        invitedAt: membership.invitedAt,
+        acceptedAt: membership.acceptedAt,
+        createdAt: membership.createdAt,
+        updatedAt: membership.updatedAt,
+        user: {
+          email: membership.userId.email,
+          displayName: membership.userId.displayName,
+        },
+        permissions: computeEffectivePermissions(
+          membership.role,
+          membership.allow,
+          membership.deny
+        ),
+      }));
+
+      return {
+        data,
+        pagination: {
+          page,
+          limit,
+          total,
+          totalPages: Math.ceil(total / limit),
+        },
+      };
+    } catch (error) {
+      throw new BadRequestException('Failed to fetch organization members');
+    }
+  }
+
+  /**
+   * Update membership role
+   */
+  async updateRole(
+    membershipId: string,
+    dto: UpdateMembershipRoleDto
+  ): Promise<Membership> {
+    try {
+      const membership = await this.membershipModel.findById(membershipId);
+      if (!membership) {
+        throw new NotFoundException('Membership not found');
+      }
+
+      // Enforce: only one OWNER per org
+      if (dto.role === UserRole.OWNER) {
+        const existingOwner = await this.membershipModel
+          .findOne({
+            orgId: membership.orgId,
+            role: UserRole.OWNER,
+            _id: { $ne: membershipId },
+          })
+          .lean();
+
+        if (existingOwner) {
+          throw new BadRequestException('Organization already has an owner');
+        }
+      }
+
+      // If reducing privileges, clear deny/allow when appropriate
+      const currentRoleIndex = Object.values(UserRole).indexOf(membership.role);
+      const newRoleIndex = Object.values(UserRole).indexOf(dto.role);
+      
+      if (newRoleIndex > currentRoleIndex) {
+        // Role is being reduced - clear custom permissions
+        membership.allow = [];
+        membership.deny = [];
+      }
+
+      membership.role = dto.role;
+      return await membership.save();
+    } catch (error) {
+      if (error instanceof HttpException) {
+        throw error;
+      }
+      throw new BadRequestException('Failed to update membership role');
+    }
+  }
+
+  /**
+   * Update membership permissions
+   */
+  async updatePermissions(
+    membershipId: string,
+    dto: UpdateMembershipPermissionsDto
+  ): Promise<Membership> {
+    try {
+      const membership = await this.membershipModel.findById(membershipId);
+      if (!membership) {
+        throw new NotFoundException('Membership not found');
+      }
+
+      membership.allow = dto.allow || [];
+      membership.deny = dto.deny || [];
+
+      return await membership.save();
+    } catch (error) {
+      if (error instanceof HttpException) {
+        throw error;
+      }
+      throw new BadRequestException('Failed to update membership permissions');
+    }
+  }
+
+  /**
+   * Remove/suspend membership
+   */
+  async removeMember(membershipId: string, currentUserId?: string): Promise<void> {
+    try {
+      const membership = await this.membershipModel.findById(membershipId);
+      if (!membership) {
+        throw new NotFoundException('Membership not found');
+      }
+
+      // Don't allow removing the last owner
+      if (membership.role === UserRole.OWNER) {
+        const ownerCount = await this.membershipModel.countDocuments({
+          orgId: membership.orgId,
+          role: UserRole.OWNER,
+          status: MembershipStatus.ACTIVE,
+        });
+
+        if (ownerCount <= 1) {
+          throw new BadRequestException('Cannot remove the last owner of an organization');
+        }
+
+        // Prevent owner from removing themselves if they are the last owner
+        if (currentUserId && membership.userId.toString() === currentUserId && ownerCount === 1) {
+          throw new BadRequestException('You cannot remove yourself as the last owner of the organization');
+        }
+      }
+
+      // Soft delete by setting status to SUSPENDED
+      membership.status = MembershipStatus.SUSPENDED;
+      await membership.save();
+    } catch (error) {
+      if (error instanceof HttpException) {
+        throw error;
+      }
+      throw new BadRequestException('Failed to remove member');
+    }
+  }
+
+  /**
+   * Find membership by user and org
+   */
+  async findByUserAndOrg(
+    userId: string,
+    orgId: string
+  ): Promise<Membership | null> {
+    return this.membershipModel
+      .findOne({
+        userId: new Types.ObjectId(userId),
+        orgId: new Types.ObjectId(orgId),
+      })
+      .lean();
+  }
+
+  /**
+   * Get user's memberships
+   */
+  async getUserMemberships(userId: string): Promise<Membership[]> {
+    return this.membershipModel
+      .find({
+        userId: new Types.ObjectId(userId),
+        status: { $in: [MembershipStatus.ACTIVE, MembershipStatus.INVITED] },
+      })
+      .populate('orgId', 'name')
+      .lean();
+  }
+
+  /**
+   * Accept membership invitation
+   */
+  async acceptInvitation(userId: string, orgId: string): Promise<Membership> {
+    try {
+      const membership = await this.membershipModel.findOne({
+        userId: new Types.ObjectId(userId),
+        orgId: new Types.ObjectId(orgId),
+        status: MembershipStatus.INVITED,
+      });
+
+      if (!membership) {
+        throw new NotFoundException('Invitation not found');
+      }
+
+      membership.status = MembershipStatus.ACTIVE;
+      membership.acceptedAt = new Date();
+
+      return await membership.save();
+    } catch (error) {
+      if (error instanceof HttpException) {
+        throw error;
+      }
+      throw new BadRequestException('Failed to accept invitation');
+    }
+  }
+}
+
+
+# ======================
+# File: memberships/dto/membership.dto.ts
+# ======================
+
+import {
+  IsEnum,
+  IsArray,
+  IsOptional,
+  IsString,
+  IsMongoId,
+} from 'class-validator';
+import { UserRole } from '../../users/enums/users.enum';
+
+export class UpdateMembershipRoleDto {
+  @IsEnum(UserRole)
+  role: UserRole;
+}
+
+export class UpdateMembershipPermissionsDto {
+  @IsArray()
+  @IsString({ each: true })
+  allow: string[];
+
+  @IsArray()
+  @IsString({ each: true })
+  deny: string[];
+}
+
+export class PaginationQueryDto {
+  @IsOptional()
+  @IsString()
+  page?: string;
+
+  @IsOptional()
+  @IsString()
+  limit?: string;
+
+  @IsOptional()
+  @IsString()
+  search?: string;
+
+  @IsOptional()
+  @IsString()
+  sort?: string;
+
+  @IsOptional()
+  @IsEnum(['asc', 'desc'])
+  dir?: 'asc' | 'desc';
+}
+
+
+# ======================
+# File: users/users.schema.ts
+# ======================
+
+import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
+import { Document, Types } from 'mongoose';
+import { UserRole, UserStatus } from './enums/users.enum';
+
+export type UserDocument = User & Document;
+
+@Schema({ collection: 'users', timestamps: true })
+export class User {
+  @Prop({
+    type: Types.ObjectId,
+    ref: 'Organization',
+    required: false,
+  })
+  orgId: Types.ObjectId;
+
+  @Prop({ required: true })
+  email: string;
+
+  @Prop({ required: false })
+  cognitoSub?: string;
+
+  @Prop({
+    enum: UserRole,
+    default: UserRole.MEMBER,
+  })
+  role: UserRole;
+
+  @Prop({
+    enum: UserStatus,
+    default: UserStatus.ACTIVE,
+  })
+  status: UserStatus;
+}
+
+export const UserSchema = SchemaFactory.createForClass(User);
+
+// Unique index on email only (multi-org support)
+UserSchema.index({ email: 1 }, { unique: true });
+// Keep orgId field for backward compatibility but don't index with email
+UserSchema.index({ orgId: 1 });
+
+
+# ======================
+# File: users/users.service.ts
+# ======================
+
+import {
+  BadRequestException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
+import { InjectModel } from '@nestjs/mongoose';
+import { Model } from 'mongoose';
+import { User, UserDocument } from './users.schema';
+import { InviteUserDto, MeDto } from './dto/user.dto';
+import {
+  Organization,
+  OrganizationDocument,
+} from '../organizations/organizations.schema';
+import { ConfigService } from '@nestjs/config';
+import { plainToInstance } from 'class-transformer';
+
+@Injectable()
+export class UsersService {
+  constructor(
+    @InjectModel(User.name) private readonly userModel: Model<UserDocument>,
+    @InjectModel(Organization.name)
+    private readonly orgModel: Model<OrganizationDocument>,
+    private readonly cfg: ConfigService,
+  ) {}
+
+  async findOrCreateFromToken(token: { sub: string; email: string }) {
+    /* 1️⃣ Look for existing user by cognitoSub (normal returning user) */
+    const bySub = await this.userModel
+      .findOne({ cognitoSub: token.sub })
+      .lean()
+      .exec();
+    if (bySub) return bySub;
+
+    /* 2️⃣ Look for existing user by email (may have been invited) */
+    const normalizedEmail = token.email.trim().toLowerCase();
+    const byEmail = await this.userModel
+      .findOne({ email: normalizedEmail })
+      .exec();
+
+    if (byEmail) {
+      // User exists but doesn't have cognitoSub yet - link the accounts
+      byEmail.cognitoSub = token.sub;
+      await byEmail.save();
+      return byEmail.toObject();
+    }
+
+    /* 3️⃣ Completely new user - create basic user record */
+    // Note: Organization membership will be handled separately through invites
+    const created = await this.userModel.create({
+      email: normalizedEmail,
+      cognitoSub: token.sub,
+      // Don't set orgId/role here - those are managed through Memberships now
+    });
+    return created.toObject();
+  }
+
+  /** Simple lookup used by RolesGuard */
+  async findBySub(sub: string) {
+    return this.userModel.findOne({ cognitoSub: sub }).lean();
+  }
+
+  async getMe(sub: string): Promise<MeDto> {
+    const user = await this.userModel
+      .findOne({ cognitoSub: sub })
+      .select('-__v -createdAt -updatedAt')
+      .lean();
+
+    if (!user) throw new NotFoundException('User not found');
+
+    return plainToInstance(MeDto, user, { excludeExtraneousValues: true });
+  }
+
+  /**
+   * Update user profile
+   */
+  async updateProfile(userId: string, dto: { displayName?: string }) {
+    try {
+      const user = await this.userModel.findByIdAndUpdate(
+        userId,
+        { $set: dto },
+        { new: true, runValidators: true }
+      );
+
+      if (!user) {
+        throw new NotFoundException('User not found');
+      }
+
+      return user;
+    } catch (error) {
+      throw new BadRequestException('Failed to update profile');
+    }
+  }
+
+  /**
+   * Update user email (after Cognito verification)
+   */
+  async updateEmail(userId: string, newEmail: string) {
+    try {
+      const user = await this.userModel.findByIdAndUpdate(
+        userId,
+        { $set: { email: newEmail } },
+        { new: true, runValidators: true }
+      );
+
+      if (!user) {
+        throw new NotFoundException('User not found');
+      }
+
+      return user;
+    } catch (error) {
+      throw new BadRequestException('Failed to update email');
+    }
+  }
+}
+
+
+# ======================
+# File: users/users.controller.ts
+# ======================
+
+import {
+  Body,
+  Controller,
+  Delete,
+  Get,
+  Param,
+  Patch,
+  Post,
+  HttpCode,
+  HttpStatus,
+  HttpException,
+  Req,
+  UseGuards,
+} from '@nestjs/common';
+import { UserRole } from './enums/users.enum';
+import { JwtAuthGuard } from '../auth/jwt-auth.guard';
+import { OrgContextGuard } from '../../auth/org-context.guard';
+import { RolesGuard } from '../auth/roles.guard';
+import { PermissionGuard, RequiredPermissions } from '../auth/permission.guard';
+import { UsersService } from './users.service';
+import { Roles } from '../auth/roles.decorator';
+import { InviteUserDto, MeDto, UpdateUserProfileDto } from './dto/user.dto';
+import { MembershipsService } from '../memberships/memberships.service';
+import { InvitesService } from '../invites/invites.service';
+import { OrgContextUser } from '../../auth/org-context.guard';
+import { computeEffectivePermissions } from '../../common/constants/permissions';
+import { PERMISSIONS } from '../../common/constants/permissions';
+
+@Controller('users')
+export class UsersController {
+  constructor(
+    private readonly usersService: UsersService,
+    private readonly membershipsService: MembershipsService,
+    private readonly invitesService: InvitesService,
+  ) {}
+
+  /**
+   * Get current user info with memberships and permissions
+   */
+  @Get('me')
+  @UseGuards(JwtAuthGuard)
+  async getMe(@Req() req: { user: OrgContextUser }) {
+    try {
+      const user = await this.usersService.findBySub(req.user.sub);
+      if (!user) {
+        throw new Error('User not found');
+      }
+
+      // Get user's memberships
+      const memberships = await this.membershipsService.getUserMemberships(req.user.userId);
+
+      // Get pending invites count
+      const pendingInvites = await this.invitesService.getUserPendingInvites(req.user.email);
+
+      // Get current org context if available
+      const currentOrg = req?.user?.orgId ? {
+        orgId: req.user.orgId,
+        role: req.user.role,
+        permissions: req.user.permissions || [],
+      } : null;
+
+      return {
+        user: {
+          id: user._id,
+          email: user.email,
+          displayName: (user as any).displayName,
+          cognitoSub: user.cognitoSub,
+        },
+        memberships: memberships.map(m => {
+          const effectivePermissions = computeEffectivePermissions(
+            m.role,
+            m.allow || [],
+            m.deny || []
+          );
+          
+          return {
+            orgId: m.orgId._id,
+            orgName: (m.orgId as any).name,
+            role: m.role,
+            status: m.status,
+            permissions: {
+              allow: m.allow || [],
+              deny: m.deny || [],
+              effective: effectivePermissions
+            }
+          };
+        }),
+        currentOrg,
+        pendingInvitesCount: pendingInvites.length,
+      };
+    } catch (error) {
+      throw error;
+    }
+  }
+
+  /**
+   * Get current user's permissions in organization context
+   * Frontend should send X-Org-Id header or orgId query parameter
+   */
+  @Get('me/permissions')
+  @UseGuards(JwtAuthGuard, OrgContextGuard, PermissionGuard)
+  @RequiredPermissions(PERMISSIONS.USERS.VIEW_PROFILE)
+  async getMyPermissions(@Req() req: { user: OrgContextUser }) {
+    try {
+      if (!req.user.orgId) {
+        throw new HttpException(
+          'Organization context required. Please provide X-Org-Id header or orgId query parameter',
+          HttpStatus.BAD_REQUEST
+        );
+      }
+
+      return {
+        status: 'success',
+        data: {
+          organizationId: req.user.orgId,
+          role: req.user.role,
+          permissions: req.user.permissions || []
+        },
+        message: `You have ${req.user.permissions?.length || 0} permissions in this organization`
+      };
+    } catch (error) {
+      if (error instanceof HttpException) {
+        throw error;
+      }
+      throw new HttpException('Error fetching permissions', HttpStatus.INTERNAL_SERVER_ERROR);
+    }
+  }
+
+  /**
+   * Update user profile
+   */
+  @Patch('me')
+  @UseGuards(JwtAuthGuard, PermissionGuard)
+  @RequiredPermissions(PERMISSIONS.USERS.UPDATE_PROFILE)
+  @HttpCode(HttpStatus.OK)
+  async updateProfile(
+    @Req() req: { user: OrgContextUser },
+    @Body() dto: UpdateUserProfileDto
+  ) {
+    try {
+      const updatedUser = await this.usersService.updateProfile(req.user.userId, dto);
+      return {
+        message: 'Profile updated successfully',
+        user: {
+          id: updatedUser._id,
+          email: updatedUser.email,
+          displayName: (updatedUser as any).displayName,
+        },
+      };
+    } catch (error) {
+      throw error;
+    }
+  }
+
+  /**
+   * Confirm email change (after Cognito email verification)
+   */
+  @Post('me/email/confirm')
+  @UseGuards(JwtAuthGuard)
+  @HttpCode(HttpStatus.OK)
+  async confirmEmailChange(@Req() req: { user: OrgContextUser }) {
+    try {
+      // Email comes from the JWT token after Cognito verification
+      const newEmail = req.user.email;
+      await this.usersService.updateEmail(req.user.userId, newEmail);
+
+      return { message: 'Email updated successfully' };
+    } catch (error) {
+      throw error;
+    }
+  }
+
+  /** Legacy invite endpoint (deprecated - use invites controller instead) */
+  @Post('invite')
+  @UseGuards(JwtAuthGuard, OrgContextGuard, PermissionGuard)
+  @RequiredPermissions(PERMISSIONS.INVITES.CREATE)
+  @HttpCode(HttpStatus.CREATED)
+  async invite(
+    @Body() dto: InviteUserDto, 
+    @Req() req: { user: OrgContextUser }
+  ) {
+    // Redirect to new invites service
+    return this.invitesService.createInvite(
+      req.user.orgId!,
+      req.user.userId,
+      {
+        email: dto.email,
+        role: dto.role,
+      }
+    );
+  }
+}
+
+
+# ======================
+# File: users/users.module.ts
+# ======================
+
+import { Module } from '@nestjs/common';
+import { MongooseModule } from '@nestjs/mongoose';
+import { User, UserSchema } from './users.schema';
+import { UsersService } from './users.service';
+import {
+  Organization,
+  OrganizationSchema,
+} from '../organizations/organizations.schema';
+import { UsersController } from './users.controller';
+import { MembershipsModule } from '../memberships/memberships.module';
+import { InvitesModule } from '../invites/invites.module';
+
+@Module({
+  imports: [
+    MongooseModule.forFeature([
+      { name: User.name, schema: UserSchema },
+      { name: Organization.name, schema: OrganizationSchema },
+    ]),
+    MembershipsModule,
+    InvitesModule,
+  ],
+  controllers: [UsersController],
+  providers: [UsersService],
+  exports: [MongooseModule, UsersService],
+})
+export class UsersModule {}
+
+
+# ======================
+# File: users/dto/user.dto.ts
+# ======================
+
+import {
+  IsEmail,
+  IsEnum,
+  IsMongoId,
+  IsOptional,
+  IsString,
+} from 'class-validator';
+import { UserRole, UserStatus } from '../enums/users.enum';
+import { Expose, Transform } from 'class-transformer';
+
+export class CreateUserDto {
+  @IsMongoId()
+  orgId: string;
+
+  @IsEmail()
+  email: string;
+
+  @IsOptional()
+  @IsString()
+  displayName?: string;
+
+  @IsOptional()         // was @IsString() (required)
+  @IsString()
+  cognitoSub?: string;
+
+  @IsEnum(UserRole)
+  role: UserRole;
+
+  @IsEnum(UserStatus)
+  status: UserStatus;
+}
+
+export class UpdateUserDto extends CreateUserDto {}
+
+
+export class InviteUserDto {
+  @IsEmail()
+  email: string;
+
+  /** Optional role override (member by default) */
+  @IsOptional()
+  @IsEnum(UserRole)
+  role: UserRole = UserRole.MEMBER;
+}
+
+export class UpdateUserProfileDto {
+  @IsOptional()
+  @IsString()
+  displayName?: string;
+}
+
+export class MeDto {
+  @Expose() _id: string;
+  @Expose() email: string;
+  @Expose() role: string;
+  @Expose() orgId?: string | null;
+
+  @Transform(() => undefined, { toPlainOnly: true })
+  __v?: never;
+  @Transform(() => undefined, { toPlainOnly: true })
+  createdAt?: never;
+  @Transform(() => undefined, { toPlainOnly: true })
+  updatedAt?: never;
+}
+
+# ======================
+# File: users/enums/users.enum.ts
+# ======================
+
+export enum UserRole {
+  OWNER   = 'owner',
+  ADMIN   = 'admin',
+  MEMBER  = 'member',
+  VIEWER  = 'viewer',
+}
+
+export enum UserStatus {
+  ACTIVE   = 'active',
+  INVITED  = 'invited',
+  DISABLED = 'disabled',
+}
+
+
+# ======================
+# File: gateways/gateways.schema.ts
+# ======================
+
+import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
+import { Document, Types } from 'mongoose';
+import { GatewayLiveStatus, GatewayStatus } from './enums/gateway.enum';
+
+export type GatewayDocument = Gateway & Document;
+
+@Schema({ collection: 'gateways', timestamps: true, _id: false })
+export class Gateway {
+  @Prop({ _id: true, type: String })
+  _id: string; // gatewayId / ThingName
+
+  @Prop({ required: true, unique: true })
+  mac: string;
+
+  @Prop({
+    type: Types.ObjectId,
+    ref: 'Organization',
+    default: null,
+  })
+  orgId: Types.ObjectId | null;
+
+  @Prop({ required: true })
+  certId: string;
+
+  @Prop({
+    enum: GatewayStatus,
+    default: GatewayStatus.ACTIVE,
+  })
+  status: GatewayStatus;
+
+  @Prop({ 
+    default: false,
+   })
+  isConnected: boolean;
+
+  @Prop()
+  firmwareVersion?: string;
+
+  @Prop({ default: '' })
+  location?: string;
+
+  @Prop()
+  lastSeen?: Date;
+
+  @Prop()
+  certPem?: string;
+
+  @Prop()
+  keyPem?: string;
+
+  @Prop()
+  caPem?: string;
+
+  /** S3 key inside iot‑cert‑packs bucket */
+  @Prop()
+  packS3Key?: string;
+
+  @Prop()
+  label?: string;
+}
+
+export const GatewaySchema = SchemaFactory.createForClass(Gateway);
+
+GatewaySchema.index({ orgId: 1 });
+GatewaySchema.index({ mac: 'text', label: 'text', location: 'text' });
+
+# ======================
+# File: gateways/gateways.controller.ts
+# ======================
+
+import {
+  Body,
+  Controller,
+  Delete,
+  Get,
+  Param,
+  Patch,
+  Post,
+  Query,
+  Req,
+  UseGuards,
+} from '@nestjs/common';
+import { normLimit, normPage } from 'src/common/utils/pagination';
+import { JwtAuthGuard } from '../auth/jwt-auth.guard';
+import { Roles } from '../auth/roles.decorator';
+import { RolesGuard } from '../auth/roles.guard';
+import { PermissionGuard } from '../auth/permission.guard';
+import { RequiredPermissions } from '../auth/permission.guard';
+import { OrgContextGuard } from '../../auth/org-context.guard';
+import { PERMISSIONS } from '../../common/constants/permissions';
+import { OrgContextUser } from '../../auth/org-context.guard';
+import { UserRole } from '../users/enums/users.enum';
+import {
+  BulkGatewaysDto,
+  CreateGatewayAdminDto,
+  RegisterGatewayDto,
+} from './dto/gateway.dto';
+import { GatewaysService } from './gateways.service';
+import { ObjectId } from 'mongodb';
+
+@Controller('gateways')
+@UseGuards(JwtAuthGuard, OrgContextGuard)
+export class GatewaysController {
+  constructor(private readonly gwSvc: GatewaysService) {}
+
+  @UseGuards(RolesGuard)
+  @Roles(UserRole.ADMIN)
+  @Post('admin/create-one')
+  createOne(@Body() dto: CreateGatewayAdminDto) {
+    return this.gwSvc.adminCreateOne(dto.mac);
+  }
+
+  @UseGuards(RolesGuard)
+  @Roles(UserRole.ADMIN)
+  @Post('admin/bulk')
+  async adminBulkCreate(@Body() dto: BulkGatewaysDto) {
+    return this.gwSvc.adminCreateBulk(dto.macs);
+  }
+
+  @UseGuards(PermissionGuard)
+  @RequiredPermissions(PERMISSIONS.GATEWAYS.CREATE)
+  @Post('register')
+  async register(@Req() req: { user: OrgContextUser }, @Body() dto: RegisterGatewayDto) {
+    return this.gwSvc.registerForOrg(req.user.orgId!, dto);
+  }
+
+  @UseGuards(PermissionGuard)
+  @RequiredPermissions(PERMISSIONS.GATEWAYS.VIEW)
+  @Get()
+  async listMine(
+    @Req() req: { user: OrgContextUser },
+    @Query() q: { page?: string; limit?: string, search?: string },
+  ) {
+    const page = normPage(q);
+    const limit = normLimit(q);
+
+    const { rows, total } = await this.gwSvc.listForOrg(req.user.orgId!, {
+      page,
+      limit,
+      search: q.search,
+    });
+
+    return {
+      data: rows,
+      pagination: {
+        total,
+        page,
+        limit,
+        totalPages: Math.ceil(total / limit),
+      },
+    };
+  }
+
+  @UseGuards(PermissionGuard)
+  @RequiredPermissions(PERMISSIONS.GATEWAYS.VIEW)
+  @Get('stats')
+  getStats(@Req() req: { user: OrgContextUser }) {
+    return this.gwSvc.getStats(req.user.orgId!);
+  }
+
+  @UseGuards(PermissionGuard)
+  @RequiredPermissions(PERMISSIONS.GATEWAYS.DETAILS)
+  @Get(':id/sensors')
+  async sensorsForGateway(
+    @Param('id') id: string,
+    @Req() req: { user: OrgContextUser },
+    @Query()
+    q: {
+      claimed?: string;
+      page?: string;
+      limit?: string;
+      search?: string;
+      sort?: string;
+      dir?: 'asc' | 'desc';
+    },
+  ) {
+    const page = normPage(q);
+    const limit = normLimit(q, 50);
+    const { rows, total } = await this.gwSvc.sensorsForGateway(
+      id,
+      req.user.orgId!,
+      {
+        page,
+        limit,
+        claimed: q.claimed,
+        search: q.search,
+        sort: q.sort,
+        dir: q.dir,
+      },
+    );
+    return {
+      data: rows,
+      pagination: { total, page, limit, totalPages: Math.ceil(total / limit) },
+    };
+  }
+
+  @UseGuards(PermissionGuard)
+  @RequiredPermissions(PERMISSIONS.GATEWAYS.DETAILS)
+  @Get(':id')
+  async getOne(@Param('id') id: string, @Req() req: { user: OrgContextUser }) {
+    return this.gwSvc.getDetails(id, req.user.orgId!);
+  }
+
+  @UseGuards(PermissionGuard)
+  @RequiredPermissions(PERMISSIONS.GATEWAYS.UPDATE)
+  @Patch(':id')
+  update(
+    @Param('id') id: string,
+    @Req() req: { user: OrgContextUser },
+    @Body() dto: { label?: string; location?: string },
+  ) {
+    return this.gwSvc.updateGateway(id, req.user.orgId!, dto);
+  }
+
+  @UseGuards(PermissionGuard)
+  @RequiredPermissions(PERMISSIONS.GATEWAYS.UPDATE)
+  @Post(':id/sensors')
+  addSensorsToGateway(
+    @Param('id') id: string,
+    @Body('macs') macs: string[],
+    @Req() req: { user: OrgContextUser },
+  ) {
+    return this.gwSvc.attachSensors(id, req.user.orgId!, macs);
+  }
+
+  @UseGuards(PermissionGuard)
+  @RequiredPermissions(PERMISSIONS.GATEWAYS.DELETE)
+  @Delete(':id')
+  async deleteGateway(
+    @Param('id') id: string,
+    @Req() req: { user: OrgContextUser },
+  ) {
+    return this.gwSvc.deleteGateway(id, req.user.orgId!);
+  }
+}
+
+
+# ======================
+# File: gateways/gateways.module.ts
+# ======================
+
+import { Module } from '@nestjs/common';
+import { MongooseModule } from '@nestjs/mongoose';
+import { Gateway, GatewaySchema } from './gateways.schema';
+import { GatewaysController } from './gateways.controller';
+import { GatewaysService } from './gateways.service';
+import {
+  Organization,
+  OrganizationSchema,
+} from '../organizations/organizations.schema';
+import { CertsService } from '../certs/certs.service';
+import { S3Service } from 'src/common/aws/s3.service';
+import { UsersService } from '../users/users.service';
+import { User, UserSchema } from '../users/users.schema';
+import { Sensor, SensorSchema } from '../sensors/sensors.schema';
+import { Telemetry, TelemetrySchema } from '../telemetry/telemetry.schema';
+import { Membership, MembershipSchema } from '../memberships/memberships.schema';
+
+@Module({
+  imports: [
+    MongooseModule.forFeature([
+      { name: Gateway.name, schema: GatewaySchema },
+      { name: Organization.name, schema: OrganizationSchema },
+      { name: User.name, schema: UserSchema },
+      { name: Sensor.name, schema: SensorSchema },
+      { name: Telemetry.name, schema: TelemetrySchema },
+      { name: Membership.name, schema: MembershipSchema },
+    ]),
+  ],
+  controllers: [GatewaysController],
+  providers: [GatewaysService, CertsService, S3Service, UsersService],
+  exports: [MongooseModule, GatewaysService],
+})
+export class GatewaysModule {}
+
+
+# ======================
+# File: gateways/gateways.service.ts
+# ======================
+
+import {
+  BadRequestException,
+  ConflictException,
+  ForbiddenException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
+import { randomUUID, randomBytes } from 'node:crypto';
+import { InjectModel } from '@nestjs/mongoose';
+import { Model, Types, PipelineStage } from 'mongoose';
+import { Gateway, GatewayDocument } from './gateways.schema';
+import {
+  Organization,
+  OrganizationDocument,
+} from '../organizations/organizations.schema';
+import { GatewayStatus } from './enums/gateway.enum';
+import { CertsService } from '../certs/certs.service';
+import { Sensor, SensorDocument } from '../sensors/sensors.schema';
+import { Telemetry, TelemetryDocument } from '../telemetry/telemetry.schema';
+
+@Injectable()
+export class GatewaysService {
+  constructor(
+    @InjectModel(Gateway.name)
+    private readonly gwModel: Model<GatewayDocument>,
+    @InjectModel(Organization.name)
+    private readonly orgModel: Model<OrganizationDocument>,
+    @InjectModel(Sensor.name)
+    private readonly sensorModel: Model<SensorDocument>,
+    @InjectModel(Telemetry.name)
+    private readonly telemetryModel: Model<TelemetryDocument>,
+    private readonly certsSvc: CertsService,
+  ) {}
+
+  async adminCreateOne(mac: string) {
+    if (await this.gwModel.findOne({ mac })) {
+      throw new ConflictException('MAC already exists');
+    }
+
+    const gatewayId = `gw_${randomUUID().slice(0, 8)}`;
+    const bundle = await this.certsSvc.provisionGateway(gatewayId, mac);
+
+    const saved = await this.gwModel.create({
+      _id: gatewayId,
+      mac,
+      certId: bundle.certId,
+      certPem: bundle.certPem,
+      keyPem: bundle.keyPem,
+      caPem: bundle.caPem,
+      packS3Key: bundle.packS3Key,
+      status: GatewayStatus.ACTIVE,
+    });
+
+    return { ...saved.toObject(), downloadUrl: bundle.download };
+  }
+
+  /** ��️  Bulk create (max 10 per request) */
+  async adminCreateBulk(macs: string[]) {
+    if (macs.length === 0 || macs.length > 10)
+      throw new BadRequestException('1‑10 MACs per call');
+
+    const results = [] as any;
+    for (const mac of macs) {
+      const result = await this.adminCreateOne(mac);
+      results.push(result);
+    }
+    return results;
+  }
+
+  async registerForOrg(orgId: string, dto: { mac: string; label?: string; location?: string }) {
+    if (!orgId) throw new BadRequestException('You are not in an organization');
+
+    /* 1️⃣ plan quota */
+    const org = await this.orgModel
+      .findById(orgId)
+      .populate<{ planId: { maxGateways: number } }>('planId', 'maxGateways')
+      .lean();
+    if (!org) throw new BadRequestException('Organization not found');
+
+    const count = await this.gwModel.countDocuments({ orgId });
+    if (count >= org.planId.maxGateways)
+      throw new ForbiddenException('Gateway limit exceeded – upgrade plan');
+
+    /* 2️⃣ duplicate MAC? */
+    if (await this.gwModel.exists({ mac: dto.mac }))
+      throw new ConflictException('MAC already registered');
+
+    /* 3️⃣ provision Thing  certs */
+    const gatewayId = `gw_${randomUUID().slice(0, 8)}`;
+    const bundle = await this.certsSvc.provisionGateway(gatewayId, dto.mac);
+
+    /* 4️⃣ persist row */
+    const saved = await this.gwModel.create({
+      _id: gatewayId,
+      mac: dto.mac,
+      orgId,
+      certId: bundle.certId,
+      certPem: bundle.certPem,
+      keyPem: bundle.keyPem,
+      caPem: bundle.caPem,
+      packS3Key: bundle.packS3Key,
+      status: GatewayStatus.ACTIVE,
+      ...(dto.label && { label: dto.label }),
+      ...(dto.location && { location: dto.location }),
+    });
+
+    return { ...saved.toObject(), downloadUrl: bundle.download };
+  }
+
+  async listForOrg(
+    orgId: string,
+    opts: { page: number; limit: number; search?: string },
+  ) {
+    const { page, limit, search } = opts;
+
+    // 1. Always match on orgId
+    const baseMatch: PipelineStage.Match = {
+      $match: { orgId: new Types.ObjectId(orgId) },
+    };
+
+    // 2. If `search` is supplied, create a case-insensitive regex
+    //    and also match against `mac` OR `label` OR `location`. Otherwise, skip it.
+    const searchStage: PipelineStage.Match | null = search
+      ? {
+          $match: {
+            $or: [
+              { mac: { $regex: search.trim(), $options: 'i' } },
+              { label: { $regex: search.trim(), $options: 'i' } },
+              { location: { $regex: search.trim(), $options: 'i' } },
+            ],
+          },
+        }
+      : null;
+
+    // 3. This $lookup will count how many sensors (grouped by `claimed`) each gateway has
+    const sensorCountsLookup: PipelineStage.Lookup = {
+      $lookup: {
+        from: 'sensors',
+        let: { gwId: '$_id', currentOrgId: new Types.ObjectId(orgId) },
+        pipeline: [
+          {
+            $match: {
+              $expr: {
+                $and: [
+                  { $in: ['$$gwId', '$lastSeenBy'] },
+                  {
+                    $or: [
+                      { $eq: ['$orgId', '$$currentOrgId'] }, // claimed sensors belonging to this org
+                      { $eq: ['$orgId', null] }, // unclaimed sensors
+                    ],
+                  },
+                ],
+              },
+            },
+          },
+          // Group by claimed=true/false and count them
+          {
+            $group: {
+              _id: '$claimed',
+              c: { $sum: 1 },
+            },
+          },
+        ],
+        as: 'sensorCounts',
+      },
+    };
+
+    // 4. Build the “rows” facet: sort, skip, limit, then append sensorCounts
+    const rowsSubFacet: PipelineStage[] = [
+      { $sort: { createdAt: -1 } },
+      { $skip: (page - 1) * limit },
+      { $limit: limit },
+      sensorCountsLookup,
+      {
+        $project: {
+          _id: 1,
+          mac: 1,
+          status: 1,
+          lastSeen: 1,
+          label: 1,
+          location: 1,
+          createdAt: 1,
+          updatedAt: 1,
+          sensorCounts: 1,
+          isConnected: 1,
+        },
+      },
+    ];
+
+    // 5. Build the full aggregation pipeline
+    const pipeline: PipelineStage[] = [];
+
+    // a) always match on orgId first
+    pipeline.push(baseMatch);
+
+    // b) if searchStage is not null, push it
+    if (searchStage) {
+      pipeline.push(searchStage);
+    }
+
+    // c) now facet into `rows` and `total`
+    pipeline.push({
+      $facet: {
+        rows: rowsSubFacet as PipelineStage.FacetPipelineStage[],
+        total: [{ $count: 'n' }] as PipelineStage.FacetPipelineStage[],
+      },
+    });
+
+    // d) unwind total count (so total = 0 if none)
+    pipeline.push({
+      $unwind: {
+        path: '$total',
+        preserveNullAndEmptyArrays: true,
+      },
+    });
+
+    // e) project out the final shape: { rows: [...], total: <number> }
+    pipeline.push({
+      $project: {
+        rows: 1,
+        total: { $ifNull: ['$total.n', 0] },
+      },
+    });
+
+    // 6. Run the aggregation
+    const [result] = await this.gwModel.aggregate(pipeline).exec();
+    // result.rows = [ ... gateway docs + sensorCounts ... ]
+    // result.total = <integer>
+
+    return {
+      rows: result.rows,
+      total: result.total,
+    };
+  }
+
+  async getDetails(gwId: string, orgId: string) {
+    const params: Record<string, any> = { _id: gwId, orgId };
+    // If gwId is ObjectId, change the params to match objectid
+    if (Types.ObjectId.isValid(gwId)) {
+      params._id = new Types.ObjectId(gwId);
+    }
+
+    const gw = await this.gwModel
+      .findOne(params)
+      .select(
+        '_id mac status claimCode lastSeen createdAt updatedAt orgId label location',
+      )
+      .lean();
+    if (!gw) throw new NotFoundException('Gateway not found in your org');
+
+    const sensorCounts = await this.sensorModel.aggregate([
+      {
+        $match: {
+          lastSeenBy: gwId,
+          $or: [
+            { orgId: new Types.ObjectId(orgId) }, // claimed sensors belonging to this org
+            { orgId: null }, // unclaimed sensors
+          ],
+        },
+      },
+      {
+        $group: {
+          _id: '$claimed',
+          count: { $sum: 1 },
+        },
+      },
+    ]);
+
+    return {
+      ...gw,
+      sensors: {
+        claimed: sensorCounts.find((c) => c._id === true)?.count ?? 0,
+        unclaimed: sensorCounts.find((c) => c._id === false)?.count ?? 0,
+      },
+      sensorCounts,
+    };
+  }
+
+  /** stats for quick dashboard tiles */
+  async getStats(orgId: string) {
+    const [totals, live] = await Promise.all([
+      this.gwModel.countDocuments({ orgId }),
+      this.gwModel.countDocuments({
+        orgId,
+        lastSeen: { $gte: new Date(Date.now() - 5 * 60_000) }, // seen in 5 min
+      }),
+    ]);
+    return { totalGateways: totals, liveGateways: live };
+  }
+
+  /** update gateway fields (label, location) */
+  async updateGateway(id: string, orgId: string, updates: { label?: string; location?: string }) {
+    const updateFields: any = {};
+    if (updates.label !== undefined) updateFields.label = updates.label;
+    if (updates.location !== undefined) updateFields.location = updates.location;
+
+    const gw = await this.gwModel.findOneAndUpdate(
+      { _id: id, orgId },
+      { $set: updateFields },
+      { new: true },
+    );
+    if (!gw) throw new NotFoundException('Gateway not found in your org');
+    return gw.toObject();
+  }
+
+  /** update just the label - keeping for backward compatibility */
+  async updateLabel(id: string, orgId: string, label?: string) {
+    return this.updateGateway(id, orgId, { label });
+  }
+
+  /** sensors under a gateway with filtering / sorting */
+  async sensorsForGateway(
+    gwId: string,
+    orgId: string,
+    opts: {
+      page: number;
+      limit: number;
+      claimed?: string;
+      search?: string;
+      sort?: string;
+      dir?: 'asc' | 'desc';
+    },
+  ) {
+    // make sure the gateway belongs to caller
+    (await this.gwModel.exists({ _id: gwId, orgId })) ||
+      (() => {
+        throw new NotFoundException('Gateway not found');
+      })();
+
+    const { page, limit, claimed, search, sort, dir } = opts;
+
+    const base: any = {
+      lastSeenBy: gwId,
+      ignored: { $ne: true },
+      $or: [{ orgId }, { orgId: null }],
+    };
+    if (claimed !== undefined) base.claimed = claimed === 'true';
+
+    if (search?.trim()) {
+      const rx = new RegExp(search.trim(), 'i');
+      base.$or.push({ mac: rx }, { displayName: rx });
+    }
+
+    const total = await this.sensorModel.countDocuments(base);
+
+    const rows = await this.sensorModel
+      .find(base)
+      .sort({ [sort || 'lastSeen']: dir === 'asc' ? 1 : -1 })
+      .skip((page - 1) * limit)
+      .limit(limit)
+      .lean();
+
+    return { rows, total };
+  }
+
+  async attachSensors(gwId: string, orgId: string, macs: string[]) {
+    // ownership check
+    (await this.gwModel.exists({ _id: gwId, orgId })) ||
+      (() => {
+        throw new NotFoundException('Gateway not found');
+      })();
+
+    await this.sensorModel.updateMany(
+      { _id: { $in: macs }, ignored: { $ne: true } },
+      { $addToSet: { lastSeenBy: gwId } },
+    );
+    return { added: macs.length };
+  }
+
+  async deleteGateway(gwId: string, orgId: string) {
+    // Check if gateway exists and belongs to the organization
+    const gateway = await this.gwModel.findOne({ _id: gwId, orgId });
+    if (!gateway) {
+      throw new NotFoundException('Gateway not found in your organization');
+    }
+
+    try {
+      // 1. Remove this gateway from sensors' lastSeenBy arrays
+      await this.sensorModel.updateMany(
+        { lastSeenBy: gwId, orgId: orgId },
+        {
+          $pull: { lastSeenBy: gwId },
+          orgId: null,
+          favorite: false,
+          displayName: '',
+          claimed: false,
+        },
+      );
+
+      // 2. Clean up telemetry data for sensors that were only seen by this gateway
+      // Find sensors that were ONLY seen by this gateway and remove their telemetry
+      const orphanedSensors = await this.sensorModel
+        .find({
+          lastSeenBy: { $size: 0 }, // After removing gwId, lastSeenBy is empty
+          orgId: null, // Unclaimed sensors
+        })
+        .select('_id')
+        .lean();
+
+      if (orphanedSensors.length > 0) {
+        const orphanedSensorIds = orphanedSensors.map((s) => s._id);
+        await this.telemetryModel.deleteMany({
+          sensorId: { $in: orphanedSensorIds },
+        });
+      }
+
+      // 3. Delete the gateway from database first
+      await this.gwModel.deleteOne({ _id: gwId, orgId });
+      // await this.gwModel.updateOne(
+      //   { _id: gwId, orgId },
+      //   { $set: { orgId: new Types.ObjectId('68282f0d90804acdfb54738d') } },
+      // );
+
+      // 4. Clean up AWS IoT certificates, thing, and S3 resources in background
+      this.cleanupGatewayResourcesInBackground(
+        gateway._id, // thingName
+        gateway.certId,
+        gateway.packS3Key,
+      );
+
+      return {
+        message: 'Gateway deleted successfully',
+        deletedGatewayId: gwId,
+        cleanedUp: {
+          sensors: `Updated sensors by removing gateway reference`,
+          // telemetry: `Removed telemetry for ${orphanedSensors.length} orphaned sensors`,
+          certificates: 'AWS IoT certificate cleanup initiated in background',
+          s3: gateway.packS3Key
+            ? 'S3 certificate pack cleanup initiated in background'
+            : 'No S3 pack to delete',
+        },
+      };
+    } catch (error) {
+      // If cleanup fails, we still want to remove the gateway from our database
+      // but we should log the error and inform the user
+      console.error(`Error during gateway cleanup for ${gwId}:`, error);
+
+      // Still delete the gateway record
+      await this.gwModel.deleteOne({ _id: gwId, orgId });
+
+      return {
+        message:
+          'Gateway deleted from database, but some cleanup operations failed',
+        deletedGatewayId: gwId,
+        warning:
+          'Some AWS resources may not have been cleaned up properly. Check logs for details.',
+        error: error.message,
+      };
+    }
+  }
+
+  /**
+   * Background cleanup method for AWS resources
+   * This runs asynchronously without blocking the API response
+   */
+  private cleanupGatewayResourcesInBackground(
+    thingName: string,
+    certId: string,
+    packS3Key?: string,
+  ): void {
+    // Run cleanup asynchronously without awaiting
+    this.certsSvc
+      .cleanupGateway(thingName, certId, packS3Key)
+      .then(() => {
+        console.log(`✅ Background cleanup completed for gateway ${thingName}`);
+      })
+      .catch((error) => {
+        console.error(
+          `❌ Background cleanup failed for gateway ${thingName}:`,
+          error,
+        );
+        // You could optionally:
+        // - Store failed cleanup tasks in a queue for retry
+        // - Send notifications to admins
+        // - Log to monitoring service
+      });
+  }
+}
+
+
+# ======================
+# File: gateways/dto/gateway.dto.ts
+# ======================
+
+import {
+  ArrayMaxSize,
+  ArrayMinSize,
+  IsEnum,
+  IsMACAddress,
+  IsMongoId,
+  IsOptional,
+  IsString,
+  Matches,
+} from 'class-validator';
+import { GatewayStatus } from '../enums/gateway.enum';
+
+export class CreateGatewayDto {
+  @IsString()
+  _id: string; // gatewayId / ThingName
+
+  @IsString()
+  mac: string;
+
+  @IsOptional()
+  @IsMongoId()
+  orgId?: string;
+
+  @IsString()
+  certId: string;
+
+  @IsEnum(GatewayStatus)
+  status: GatewayStatus;
+
+  @IsOptional()
+  @IsString()
+  firmwareVersion?: string;
+
+  @IsOptional()
+  @IsString()
+  location?: string;
+}
+
+export class UpdateGatewayDto extends CreateGatewayDto {}
+
+export class AdminCreateGatewayDto {
+  /** Factory‑printed MAC on the sticker */
+  @IsMACAddress() mac!: string;
+
+  /** Optional human label shown in dashboard before claim */
+  @IsOptional()
+  @IsString()
+  label?: string;
+
+  /** Optional location information */
+  @IsOptional()
+  @IsString()
+  location?: string;
+}
+
+export class CreateGatewayAdminDto {
+  @IsMACAddress() mac!: string;
+}
+
+export class BulkGatewaysDto {
+  /** 1‑10 MAC addresses per call */
+  @ArrayMinSize(1)
+  @ArrayMaxSize(10)
+  @IsMACAddress(undefined, { each: true })
+  macs!: string[];
+}
+
+export class RegisterGatewayDto {
+  /** Factory-printed MAC on sticker */
+  @Matches(/^([0-9A-F]{2}:){3,5}[0-9A-F]{2}$/i, {
+    message: 'mac must be 4-octet or 6-octet colon-separated hex',
+  })
+  mac!: string;
+
+  /** Optional human-friendly label shown in dashboard before first ping */
+  @IsOptional()
+  @IsString()
+  label?: string;
+
+  /** Optional location information */
+  @IsOptional()
+  @IsString()
+  location?: string;
+}
+
+
+# ======================
+# File: gateways/enums/gateway.enum.ts
+# ======================
+
+export enum GatewayStatus {
+  ACTIVE = 'active',
+  REVOKED = 'revoked',
+}
+
+export enum GatewayLiveStatus {
+  ONLINE = 'online',
+  OFFLINE = 'offline',
+  UNREACHABLE = 'unreachable',
+  UNKNOWN = 'unknown',
+}
+
+
+# ======================
+# File: invites/invites.controller.ts
+# ======================
+
+import {
+  Controller,
+  Get,
+  Post,
+  Delete,
+  Param,
+  Body,
+  Query,
+  Req,
+  UseGuards,
+  HttpCode,
+  HttpStatus,
+} from '@nestjs/common';
+import { JwtAuthGuard } from '../auth/jwt-auth.guard';
+import { OrgContextGuard } from '../../auth/org-context.guard';
+import { RolesGuard } from '../auth/roles.guard';
+import { PermissionGuard } from '../auth/permission.guard';
+import { RequiredPermissions } from '../auth/permission.guard';
+import { PERMISSIONS } from '../../common/constants/permissions';
+import { Roles } from '../auth/roles.decorator';
+import { Public } from '../auth/public.decorator';
+import { UserRole } from '../users/enums/users.enum';
+import { InvitesService } from './invites.service';
+import { CreateInviteDto, InviteListQueryDto } from './dto/invite.dto';
+import { OrgContextUser } from '../../auth/org-context.guard';
+
+@Controller()
+export class InvitesController {
+  constructor(private readonly invitesService: InvitesService) {}
+
+  /**
+   * Create invite (org-scoped)
+   */
+  @UseGuards(JwtAuthGuard, OrgContextGuard, PermissionGuard)
+  @RequiredPermissions(PERMISSIONS.INVITES.CREATE)
+  @Post('organizations/:orgId/invites')
+  @HttpCode(HttpStatus.CREATED)
+  async createInvite(
+    @Param('orgId') orgId: string,
+    @Req() req: { user: OrgContextUser },
+    @Body() dto: CreateInviteDto
+  ) {
+    try {
+      const invite = await this.invitesService.createInvite(
+        orgId,
+        req.user.userId,
+        dto
+      );
+
+      return {
+        message: 'Invite created and sent successfully',
+        invite: {
+          id: (invite as any)._id,
+          email: invite.email,
+          role: invite.role,
+          status: invite.status,
+          expiresAt: invite.expiresAt,
+        },
+      };
+    } catch (error) {
+      throw error;
+    }
+  }
+
+  /**
+   * List invites for organization
+   */
+  @UseGuards(JwtAuthGuard, OrgContextGuard, PermissionGuard)
+  @RequiredPermissions(PERMISSIONS.INVITES.VIEW)
+  @Get('organizations/:orgId/invites')
+  async getInvites(
+    @Param('orgId') orgId: string,
+    @Query() query: InviteListQueryDto
+  ) {
+    try {
+      const options = {
+        page: query.page ? parseInt(query.page, 10) : 1,
+        limit: query.limit ? parseInt(query.limit, 10) : 20,
+        status: query.status || [],
+      };
+
+      return await this.invitesService.getOrgInvites(orgId, options);
+    } catch (error) {
+      throw error;
+    }
+  }
+
+  /**
+   * Revoke invite
+   */
+  @UseGuards(JwtAuthGuard, OrgContextGuard, PermissionGuard)
+  @RequiredPermissions(PERMISSIONS.INVITES.REVOKE)
+  @Delete('organizations/:orgId/invites/:token')
+  @HttpCode(HttpStatus.NO_CONTENT)
+  async revokeInvite(
+    @Param('orgId') orgId: string,
+    @Param('token') token: string
+  ) {
+    try {
+      await this.invitesService.revokeInvite(token, orgId);
+    } catch (error) {
+      throw error;
+    }
+  }
+
+  /**
+   * Get invite info (public)
+   */
+  @Get('invites/:token')
+  @Public()
+  async getInviteInfo(@Param('token') token: string) {
+    try {
+      return await this.invitesService.getInviteByToken(token);
+    } catch (error) {
+      throw error;
+    }
+  }
+
+  /**
+   * Accept invite
+   */
+  @Post('invites/:token/accept')
+  @UseGuards(JwtAuthGuard)
+  @HttpCode(HttpStatus.OK)
+  async acceptInvite(
+    @Param('token') token: string,
+    @Req() req: { user: OrgContextUser }
+  ) {
+    try {
+      await this.invitesService.acceptInvite(token, req.user.userId);
+      return { message: 'Invitation accepted successfully' };
+    } catch (error) {
+      throw error;
+    }
+  }
+
+  /**
+   * Decline invite
+   */
+  @Post('invites/:token/decline')
+  @UseGuards(JwtAuthGuard)
+  @HttpCode(HttpStatus.OK)
+  async declineInvite(
+    @Param('token') token: string,
+    @Req() req: { user: OrgContextUser }
+  ) {
+    try {
+      await this.invitesService.declineInvite(token, req.user.userId);
+      return { message: 'Invitation declined' };
+    } catch (error) {
+      throw error;
+    }
+  }
+
+  /**
+   * Get user's pending invites
+   */
+  @Get('me/invites')
+  @UseGuards(JwtAuthGuard)
+  async getMyInvites(@Req() req: { user: OrgContextUser }) {
+    try {
+      const invites = await this.invitesService.getUserPendingInvites(req.user.email);
+      return { invites };
+    } catch (error) {
+      throw error;
+    }
+  }
+}
+
+
+# ======================
+# File: invites/invites.module.ts
+# ======================
+
+import { Module } from '@nestjs/common';
+import { MongooseModule } from '@nestjs/mongoose';
+import { Invite, InviteSchema } from './invites.schema';
+import { User, UserSchema } from '../users/users.schema';
+import { Organization, OrganizationSchema } from '../organizations/organizations.schema';
+import { Membership, MembershipSchema } from '../memberships/memberships.schema';
+import { InvitesService } from './invites.service';
+import { InvitesController } from './invites.controller';
+import { MembershipsModule } from '../memberships/memberships.module';
+import { MailModule } from '../mail/mail.module';
+
+@Module({
+  imports: [
+    MongooseModule.forFeature([
+      { name: Invite.name, schema: InviteSchema },
+      { name: User.name, schema: UserSchema },
+      { name: Organization.name, schema: OrganizationSchema },
+      { name: Membership.name, schema: MembershipSchema },
+    ]),
+    MembershipsModule,
+    MailModule,
+  ],
+  controllers: [InvitesController],
+  providers: [InvitesService],
+  exports: [MongooseModule, InvitesService],
+})
+export class InvitesModule {}
+
+
+# ======================
+# File: invites/invites.schema.ts
+# ======================
+
+import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
+import { Document, Types } from 'mongoose';
+import { UserRole } from '../users/enums/users.enum';
+
+export type InviteDocument = Invite & Document;
+
+export enum InviteStatus {
+  CREATED = 'CREATED',
+  SENT = 'SENT',
+  DELIVERED = 'DELIVERED',
+  BOUNCED = 'BOUNCED',
+  ACCEPTED = 'ACCEPTED',
+  EXPIRED = 'EXPIRED',
+  REVOKED = 'REVOKED',
+  DECLINED = 'DECLINED'
+}
+
+@Schema({ collection: 'invites', timestamps: true })
+export class Invite {
+  @Prop({ required: true })
+  email: string;
+
+  @Prop({ type: Types.ObjectId, ref: 'Organization', required: true })
+  orgId: Types.ObjectId;
+
+  @Prop({ enum: UserRole, default: UserRole.MEMBER })
+  role: UserRole;
+
+  @Prop({ type: [String], default: [] })
+  allow: string[];
+
+  @Prop({ type: [String], default: [] })
+  deny: string[];
+
+  @Prop({ required: true })
+  token: string;
+
+  @Prop({ required: true })
+  expiresAt: Date;
+
+  @Prop({ enum: InviteStatus, default: InviteStatus.CREATED })
+  status: InviteStatus;
+
+  @Prop()
+  lastEmailMessageId?: string;
+
+  @Prop()
+  deliveryAt?: Date;
+
+  @Prop({ type: Types.ObjectId, ref: 'User' })
+  acceptedBy?: Types.ObjectId;
+
+  @Prop()
+  acceptedAt?: Date;
+
+  @Prop()
+  declinedAt?: Date;
+
+  @Prop({ type: Types.ObjectId, ref: 'User', required: true })
+  invitedBy: Types.ObjectId;
+}
+
+export const InviteSchema = SchemaFactory.createForClass(Invite);
+
+// Indexes
+InviteSchema.index({ orgId: 1, email: 1 });
+InviteSchema.index({ token: 1 }, { unique: true });
+InviteSchema.index({ email: 1, status: 1 });
+InviteSchema.index({ expiresAt: 1 });
+
+
+# ======================
+# File: invites/invites.service.ts
+# ======================
+
+import {
+  Injectable,
+  NotFoundException,
+  BadRequestException,
+  ConflictException,
+  HttpException,
+  Logger,
+} from '@nestjs/common';
+import { InjectModel } from '@nestjs/mongoose';
+import { Model, Types } from 'mongoose';
+import { randomBytes } from 'crypto';
+import { Invite, InviteDocument, InviteStatus } from './invites.schema';
+import { User, UserDocument } from '../users/users.schema';
+import { Organization, OrganizationDocument } from '../organizations/organizations.schema';
+import { Membership, MembershipDocument, MembershipStatus } from '../memberships/memberships.schema';
+import { MembershipsService } from '../memberships/memberships.service';
+import { MailService } from '../mail/mail.service';
+import { UserRole } from '../users/enums/users.enum';
+import { ConfigService } from '@nestjs/config';
+
+export interface CreateInviteDto {
+  email: string;
+  role?: UserRole;
+  allow?: string[];
+  deny?: string[];
+}
+
+export interface InviteInfo {
+  email: string;
+  orgName: string;
+  role: UserRole;
+  allow: string[];
+  deny: string[];
+  expiresAt: Date;
+  status: InviteStatus;
+  expired: boolean;
+}
+
+export interface PaginationOptions {
+  page?: number;
+  limit?: number;
+  status?: InviteStatus[];
+}
+
+export interface PaginatedResult<T> {
+  data: T[];
+  pagination: {
+    page: number;
+    limit: number;
+    total: number;
+    totalPages: number;
+  };
+}
+
+@Injectable()
+export class InvitesService {
+  private readonly logger = new Logger(InvitesService.name);
+
+  constructor(
+    @InjectModel(Invite.name) private inviteModel: Model<InviteDocument>,
+    @InjectModel(User.name) private userModel: Model<UserDocument>,
+    @InjectModel(Organization.name) private orgModel: Model<OrganizationDocument>,
+    @InjectModel(Membership.name) private membershipModel: Model<MembershipDocument>,
+    private readonly membershipsService: MembershipsService,
+    private readonly mailService: MailService,
+    private readonly config: ConfigService,
+  ) {}
+
+  /**
+   * Create and send invite
+   */
+  async createInvite(
+    orgId: string,
+    invitedBy: string,
+    dto: CreateInviteDto
+  ): Promise<Invite> {
+    const session = await this.inviteModel.db.startSession();
+    
+    try {
+      session.startTransaction();
+
+      // Validate organization exists
+      const org = await this.orgModel.findById(orgId).lean();
+      if (!org) {
+        throw new NotFoundException('Organization not found');
+      }
+
+      // Check if user is already a member
+      // First, normalize email to lowercase
+      const normalizedEmail = dto.email.trim().toLowerCase();
+      
+      // Find user by email first
+      const existingUser = await this.userModel.findOne({ email: normalizedEmail }).lean();
+      if (existingUser) {
+        // Check if this user is already a member of this org
+        const existingMembership = await this.membershipModel.findOne({
+          orgId: new Types.ObjectId(orgId),
+          userId: existingUser._id,
+          status: { $ne: MembershipStatus.SUSPENDED }
+        }).lean();
+
+        if (existingMembership) {
+          throw new ConflictException({
+            status: 409,
+            code: 'MEMBERSHIP_EXISTS',
+            message: 'User is already a member of this organization',
+          });
+        }
+      }
+
+      // Check for existing pending invite and revoke it
+      const existingInvite = await this.inviteModel.findOne({
+        email: normalizedEmail,
+        orgId: new Types.ObjectId(orgId),
+        status: { $in: [InviteStatus.CREATED, InviteStatus.SENT, InviteStatus.DELIVERED] },
+      });
+
+      if (existingInvite) {
+        // Revoke old invite and create new one
+        existingInvite.status = InviteStatus.REVOKED;
+        await existingInvite.save();
+      }
+
+      // Ensure user exists (create if needed)
+      let user = await this.userModel.findOne({ email: normalizedEmail });
+      if (!user) {
+        const [newUser] = await this.userModel.create([{
+          email: normalizedEmail,
+          role: dto?.role || UserRole.MEMBER, // Default role for new users
+        }], { session });
+        user = newUser;
+      }
+
+      // Create or update membership in INVITED status
+      let membership = await this.membershipModel.findOne({
+        userId: user._id,
+        orgId: new Types.ObjectId(orgId),
+      });
+
+      if (membership) {
+        // Update existing membership
+        membership.role = dto.role || UserRole.MEMBER;
+        membership.allow = dto.allow || [];
+        membership.deny = dto.deny || [];
+        membership.status = MembershipStatus.INVITED;
+        membership.invitedBy = new Types.ObjectId(invitedBy);
+        membership.invitedAt = new Date();
+        await membership.save({ session });
+      } else {
+        // Create new membership
+        const [newMembership] = await this.membershipModel.create([{
+          userId: user._id,
+          orgId: new Types.ObjectId(orgId),
+          role: dto?.role || UserRole.MEMBER,
+          allow: dto?.allow || [],
+          deny: dto?.deny || [],
+          status: MembershipStatus.INVITED,
+          invitedBy: new Types.ObjectId(invitedBy),
+          invitedAt: new Date(),
+        }], { session });
+        membership = newMembership;
+      }
+
+      // Generate secure token
+      const token = this.generateToken();
+      const expiresAt = new Date(Date.now() + 48 * 60 * 60 * 1000); // 48 hours
+
+      // Create invite
+      const [invite] = await this.inviteModel.create([{
+        email: normalizedEmail,
+        orgId: new Types.ObjectId(orgId),
+        role: dto?.role || UserRole.MEMBER,
+        allow: dto?.allow || [],
+        deny: dto?.deny || [],
+        token,
+        expiresAt,
+        status: InviteStatus.CREATED,
+        invitedBy: new Types.ObjectId(invitedBy),
+      }], { session });
+
+      await session.commitTransaction();
+
+      // TODO: Send email (outside transaction) - Currently commented out for testing
+      // Uncomment when SES is configured
+      try {
+        const inviteUrl = this.buildInviteUrl(token);
+        
+        // TODO: Email sending temporarily disabled for testing
+        // const messageId = await this.mailService.sendInviteEmail(
+        //   dto.email,
+        //   'organization-invite',
+        //   {
+        //     orgName: org.name,
+        //     role: dto.role || UserRole.MEMBER,
+        //     inviteUrl,
+        //     expiresAt: expiresAt.toISOString(),
+        //   }
+        // );
+
+        // Update invite with email info (mock data for testing)
+        invite.status = InviteStatus.SENT;
+        // invite.lastEmailMessageId = messageId;
+        invite.lastEmailMessageId = `mock-message-id-${Date.now()}`;
+        invite.deliveryAt = new Date();
+        await invite.save();
+
+        this.logger.log(`Invite created for ${dto.email} for org ${org.name} (email sending disabled)`);
+        this.logger.log(`Invite URL for testing: ${inviteUrl}`);
+      } catch (emailError) {
+        this.logger.error(`Failed to process invite for ${dto.email}:`, emailError);
+        // Don't fail the whole operation if email fails
+      }
+
+      return invite;
+    } catch (error) {
+      await session.abortTransaction();
+      if (error instanceof HttpException) {
+        throw error;
+      }
+      this.logger.error('Failed to create invite:', error);
+      throw new BadRequestException('Failed to create invite');
+    } finally {
+      session.endSession();
+    }
+  }
+
+  /**
+   * Get invites for organization
+   */
+  async getOrgInvites(
+    orgId: string,
+    options: PaginationOptions = {}
+  ): Promise<PaginatedResult<Invite>> {
+    try {
+      const {
+        page = 1,
+        limit = 20,
+        status = [],
+      } = options;
+
+      const skip = (page - 1) * limit;
+
+      let filter: any = { orgId: new Types.ObjectId(orgId) };
+      if (status.length > 0) {
+        filter.status = { $in: status };
+      }
+
+      const [invites, total] = await Promise.all([
+        this.inviteModel
+          .find(filter)
+          .populate('orgId', 'name')
+          .populate('invitedBy', 'email displayName')
+          .sort({ createdAt: -1 })
+          .skip(skip)
+          .limit(limit)
+          .lean(),
+        this.inviteModel.countDocuments(filter),
+      ]);
+
+      return {
+        data: invites,
+        pagination: {
+          page,
+          limit,
+          total,
+          totalPages: Math.ceil(total / limit),
+        },
+      };
+    } catch (error) {
+      throw new BadRequestException('Failed to fetch invites');
+    }
+  }
+
+  /**
+   * Get invite by token (public)
+   */
+  async getInviteByToken(token: string): Promise<InviteInfo> {
+    try {
+      const invite = await this.inviteModel
+        .findOne({ token })
+        .populate('orgId', 'name')
+        .lean();
+
+      if (!invite) {
+        throw new NotFoundException({
+          status: 404,
+          code: 'INVITE_NOT_FOUND',
+          message: 'Invite token is invalid.',
+        });
+      }
+
+      const now = new Date();
+      const expired = now > invite.expiresAt;
+
+      if (expired && invite.status !== InviteStatus.EXPIRED) {
+        // Mark as expired
+        await this.inviteModel.updateOne(
+          { _id: invite._id },
+          { status: InviteStatus.EXPIRED }
+        );
+      }
+
+      return {
+        email: invite.email,
+        orgName: (invite.orgId as any).name,
+        role: invite.role,
+        allow: invite.allow,
+        deny: invite.deny,
+        expiresAt: invite.expiresAt,
+        status: expired ? InviteStatus.EXPIRED : invite.status,
+        expired,
+      };
+    } catch (error) {
+      if (error instanceof HttpException) {
+        throw error;
+      }
+      throw new BadRequestException('Failed to fetch invite');
+    }
+  }
+
+  /**
+   * Accept invite
+   */
+  async acceptInvite(token: string, userId: string): Promise<void> {
+    const session = await this.inviteModel.db.startSession();
+
+    try {
+      session.startTransaction();
+
+      const invite = await this.inviteModel.findOne({ token });
+      if (!invite) {
+        throw new NotFoundException({
+          status: 404,
+          code: 'INVITE_NOT_FOUND',
+          message: 'Invite token is invalid.',
+        });
+      }
+
+      if (invite.status === InviteStatus.ACCEPTED) {
+        throw new BadRequestException({
+          status: 409,
+          code: 'INVITE_ALREADY_ACCEPTED',
+          message: 'This invite has already been accepted.',
+        });
+      }
+
+      if (invite.status === InviteStatus.REVOKED) {
+        throw new BadRequestException({
+          status: 423,
+          code: 'INVITE_REVOKED',
+          message: 'This invite has been revoked.',
+        });
+      }
+
+      if (new Date() > invite.expiresAt) {
+        invite.status = InviteStatus.EXPIRED;
+        await invite.save({ session });
+        throw new BadRequestException({
+          status: 410,
+          code: 'INVITE_EXPIRED',
+          message: 'This invite has expired.',
+        });
+      }
+
+      // Verify user email matches invite (case-insensitive)
+      const user = await this.userModel.findById(userId);
+      if (!user || user.email.toLowerCase() !== invite.email.toLowerCase()) {
+        throw new BadRequestException({
+          status: 403,
+          code: 'EMAIL_MISMATCH',
+          message: 'Your email does not match the invited email.',
+        });
+      }
+
+      // Accept the membership
+      await this.membershipsService.acceptInvitation(userId, invite.orgId.toString());
+
+      // Mark invite as accepted
+      invite.status = InviteStatus.ACCEPTED;
+      invite.acceptedBy = new Types.ObjectId(userId);
+      invite.acceptedAt = new Date();
+      await invite.save({ session });
+
+      await session.commitTransaction();
+
+      this.logger.log(`User ${user.email} accepted invite for org ${invite.orgId}`);
+    } catch (error) {
+      await session.abortTransaction();
+      if (error instanceof HttpException) {
+        throw error;
+      }
+      throw new BadRequestException('Failed to accept invite');
+    } finally {
+      session.endSession();
+    }
+  }
+
+  /**
+   * Decline invite
+   */
+  async declineInvite(token: string, userId?: string): Promise<void> {
+    try {
+      const invite = await this.inviteModel.findOne({ token });
+      if (!invite) {
+        throw new NotFoundException({
+          status: 404,
+          code: 'INVITE_NOT_FOUND',
+          message: 'Invite token is invalid.',
+        });
+      }
+
+      if (invite.status === InviteStatus.DECLINED) {
+        throw new BadRequestException({
+          status: 409,
+          code: 'INVITE_ALREADY_DECLINED',
+          message: 'This invite has already been declined.',
+        });
+      }
+
+      // Mark invite as declined
+      invite.status = InviteStatus.DECLINED;
+      invite.declinedAt = new Date();
+      await invite.save();
+
+      // Find and suspend the pending membership
+      if (userId) {
+        const membership = await this.membershipModel.findOne({
+          userId: new Types.ObjectId(userId),
+          orgId: invite.orgId,
+          status: MembershipStatus.INVITED,
+        });
+
+        if (membership) {
+          membership.status = MembershipStatus.SUSPENDED;
+          await membership.save();
+        }
+      }
+
+      this.logger.log(`Invite ${token} declined`);
+    } catch (error) {
+      if (error instanceof HttpException) {
+        throw error;
+      }
+      throw new BadRequestException('Failed to decline invite');
+    }
+  }
+
+  /**
+   * Revoke invite (with org verification)
+   */
+  async revokeInvite(token: string, orgId?: string): Promise<void> {
+    try {
+      const invite = await this.inviteModel.findOne({ token });
+      if (!invite) {
+        throw new NotFoundException({
+          status: 404,
+          code: 'INVITE_NOT_FOUND',
+          message: 'Invite token is invalid.',
+        });
+      }
+
+      // Verify orgId if provided (for org-scoped revocation)
+      if (orgId && invite.orgId.toString() !== orgId) {
+        throw new BadRequestException({
+          status: 400,
+          code: 'INVITE_ORG_MISMATCH',
+          message: 'Invite does not belong to the specified organization.',
+        });
+      }
+
+      if ([InviteStatus.ACCEPTED, InviteStatus.DECLINED, InviteStatus.EXPIRED].includes(invite.status)) {
+        throw new BadRequestException({
+          status: 400,
+          code: 'INVITE_CANNOT_REVOKE',
+          message: 'Cannot revoke an invite that has been accepted, declined, or expired.',
+        });
+      }
+
+      invite.status = InviteStatus.REVOKED;
+      await invite.save();
+
+      this.logger.log(`Invite ${token} revoked`);
+    } catch (error) {
+      if (error instanceof HttpException) {
+        throw error;
+      }
+      throw new BadRequestException('Failed to revoke invite');
+    }
+  }
+
+  /**
+   * Get pending invites for user email
+   */
+  async getUserPendingInvites(email: string): Promise<Invite[]> {
+    return this.inviteModel
+      .find({
+        email,
+        status: { $in: [InviteStatus.CREATED, InviteStatus.SENT, InviteStatus.DELIVERED] },
+        expiresAt: { $gt: new Date() },
+      })
+      .populate('orgId', 'name')
+      .lean();
+  }
+
+  /**
+   * Generate secure token
+   */
+  private generateToken(): string {
+    return randomBytes(24).toString('base64url');
+  }
+
+  /**
+   * Build invite URL
+   */
+  private buildInviteUrl(token: string): string {
+    const baseUrl = this.config.get('app.frontendUrl') || 'http://localhost:3001';
+    return `${baseUrl}/invites/${token}`;
+  }
+}
+
+
+# ======================
+# File: invites/dto/invite.dto.ts
+# ======================
+
+import {
+  IsEmail,
+  IsEnum,
+  IsArray,
+  IsOptional,
+  IsString,
+} from 'class-validator';
+import { UserRole } from '../../users/enums/users.enum';
+import { InviteStatus } from '../invites.schema';
+
+export class CreateInviteDto {
+  @IsEmail()
+  email: string;
+
+  @IsOptional()
+  @IsEnum(UserRole)
+  role?: UserRole;
+
+  @IsOptional()
+  @IsArray()
+  @IsString({ each: true })
+  allow?: string[];
+
+  @IsOptional()
+  @IsArray()
+  @IsString({ each: true })
+  deny?: string[];
+}
+
+export class InviteListQueryDto {
+  @IsOptional()
+  @IsString()
+  page?: string;
+
+  @IsOptional()
+  @IsString()
+  limit?: string;
+
+  @IsOptional()
+  @IsArray()
+  @IsEnum(InviteStatus, { each: true })
+  status?: InviteStatus[];
+}

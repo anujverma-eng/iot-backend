@@ -8,8 +8,7 @@ import { UsersService } from '../users/users.service';
 import { User, UserSchema } from '../users/users.schema';
 import { Organization, OrganizationSchema } from '../organizations/organizations.schema';
 import { Telemetry, TelemetrySchema } from '../telemetry/telemetry.schema';
-import { SettingsService } from '../settings/settings.service';
-import { Settings, SettingsSchema } from '../settings/settings.schema';
+import { SettingsModule } from '../settings/settings.module';
 
 @Module({
   imports: [
@@ -20,11 +19,11 @@ import { Settings, SettingsSchema } from '../settings/settings.schema';
         { name: User.name, schema: UserSchema },
         { name: Organization.name, schema: OrganizationSchema },
         { name: Telemetry.name, schema: TelemetrySchema },
-        { name: Settings.name, schema: SettingsSchema },
       ]
     ),
+    SettingsModule,
   ],
-  providers: [SensorsService, UsersService, SettingsService],
+  providers: [SensorsService, UsersService],
   controllers: [SensorsController],
   exports: [MongooseModule],
 })

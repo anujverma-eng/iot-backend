@@ -13,9 +13,12 @@ import { RolesGuard } from '../auth/roles.guard';
 import { UserRole } from '../users/enums/users.enum';
 import { IotCredsDto } from './dto/realtime.dto';
 import { GatewaysService } from '../gateways/gateways.service';
+import { OrgContextGuard } from 'src/auth/org-context.guard';
+import { PermissionGuard, RequiredPermissions } from '../auth/permission.guard';
+import { PERMISSIONS } from 'src/common/constants/permissions';
 
 @Controller('realtime')
-@UseGuards(JwtAuthGuard, RolesGuard)
+@UseGuards(JwtAuthGuard)
 export class RealtimeController {
   constructor(
     private readonly svc: IotSessionService,
@@ -78,6 +81,8 @@ export class RealtimeController {
   }
 
   @Post('attach-policy')
+  @UseGuards(OrgContextGuard, PermissionGuard)
+  @RequiredPermissions(PERMISSIONS.SENSORS.LIVE)
   async attachPolicy(@Req() req: any) {
     // Expect Authorization: Bearer <ID_TOKEN>
     const auth = req.headers?.authorization || '';

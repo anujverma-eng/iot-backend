@@ -7,7 +7,7 @@ import {
 } from '@nestjs/common';
 import { randomUUID, randomBytes } from 'node:crypto';
 import { InjectModel } from '@nestjs/mongoose';
-import { Model, Types, PipelineStage } from 'mongoose';
+import { Model, Types, PipelineStage, ObjectId } from 'mongoose';
 import { Gateway, GatewayDocument } from './gateways.schema';
 import {
   Organization,
@@ -240,6 +240,10 @@ export class GatewaysService {
       params._id = new Types.ObjectId(gwId);
     }
 
+    if (Types.ObjectId.isValid(orgId)) {
+      params.orgId = new Types.ObjectId(orgId);
+    }
+
     const gw = await this.gwModel
       .findOne(params)
       .select(
@@ -295,7 +299,7 @@ export class GatewaysService {
     if (updates.location !== undefined) updateFields.location = updates.location;
 
     const gw = await this.gwModel.findOneAndUpdate(
-      { _id: id, orgId },
+      { _id: id,  orgId: new Types.ObjectId(orgId) },
       { $set: updateFields },
       { new: true },
     );
@@ -322,7 +326,7 @@ export class GatewaysService {
     },
   ) {
     // make sure the gateway belongs to caller
-    (await this.gwModel.exists({ _id: gwId, orgId })) ||
+    (await this.gwModel.exists({ _id: gwId, orgId: new Types.ObjectId(orgId) })) ||
       (() => {
         throw new NotFoundException('Gateway not found');
       })();
@@ -332,7 +336,7 @@ export class GatewaysService {
     const base: any = {
       lastSeenBy: gwId,
       ignored: { $ne: true },
-      $or: [{ orgId }, { orgId: null }],
+      $or: [{ orgId: new Types.ObjectId(orgId) }, { orgId: null }],
     };
     if (claimed !== undefined) base.claimed = claimed === 'true';
 
@@ -355,7 +359,7 @@ export class GatewaysService {
 
   async attachSensors(gwId: string, orgId: string, macs: string[]) {
     // ownership check
-    (await this.gwModel.exists({ _id: gwId, orgId })) ||
+    (await this.gwModel.exists({ _id: gwId, orgId: new Types.ObjectId(orgId) })) ||
       (() => {
         throw new NotFoundException('Gateway not found');
       })();
@@ -369,7 +373,7 @@ export class GatewaysService {
 
   async deleteGateway(gwId: string, orgId: string) {
     // Check if gateway exists and belongs to the organization
-    const gateway = await this.gwModel.findOne({ _id: gwId, orgId });
+    const gateway = await this.gwModel.findOne({ _id: gwId, orgId: new Types.ObjectId(orgId) }).lean();
     if (!gateway) {
       throw new NotFoundException('Gateway not found in your organization');
     }
@@ -377,7 +381,7 @@ export class GatewaysService {
     try {
       // 1. Remove this gateway from sensors' lastSeenBy arrays
       await this.sensorModel.updateMany(
-        { lastSeenBy: gwId, orgId: orgId },
+        { lastSeenBy: gwId, orgId: new Types.ObjectId(orgId) },
         {
           $pull: { lastSeenBy: gwId },
           orgId: null,

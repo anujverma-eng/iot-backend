@@ -2,17 +2,15 @@ import {
   CanActivate,
   ExecutionContext,
   Injectable,
+  ForbiddenException,
 } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
-import { UsersService } from '../users/users.service';
 import { UserRole } from '../users/enums/users.enum';
+import { OrgContextUser } from '../../auth/org-context.guard';
 
 @Injectable()
 export class RolesGuard implements CanActivate {
-  constructor(
-    private reflector: Reflector,
-    private usersSvc: UsersService,
-  ) {}
+  constructor(private reflector: Reflector) {}
 
   async canActivate(ctx: ExecutionContext): Promise<boolean> {
     const requiredRoles =
@@ -20,10 +18,20 @@ export class RolesGuard implements CanActivate {
 
     if (requiredRoles.length === 0) return true; // no role restriction
 
-    const { user } = ctx.switchToHttp().getRequest<{ user?: { sub: string } }>();
-    if (!user?.sub) return false;
+    const request = ctx.switchToHttp().getRequest();
+    const user = request.user as OrgContextUser;
+    
+    if (!user?.role) {
+      throw new ForbiddenException('No organization context or role found');
+    }
 
-    const dbUser = await this.usersSvc.findBySub(user.sub);
-    return !!dbUser && requiredRoles.includes(dbUser.role);
+    const hasRole = requiredRoles.includes(user.role as UserRole);
+    if (!hasRole) {
+      throw new ForbiddenException(
+        `Insufficient role. Required: ${requiredRoles.join(' or ')}, Have: ${user.role}`
+      );
+    }
+
+    return true;
   }
 }

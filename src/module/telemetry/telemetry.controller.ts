@@ -13,14 +13,14 @@ import { Roles } from '../auth/roles.decorator';
 import { RolesGuard } from '../auth/roles.guard';
 import { SensorsService } from '../sensors/sensors.service';
 import { UserRole } from '../users/enums/users.enum';
-import {
-  TelemetryQuery,
-  TelemetryQueryBody
-} from './dto/telemetry.dto';
+import { TelemetryQuery, TelemetryQueryBody } from './dto/telemetry.dto';
 import { TelemetryService } from './telemetry.service';
+import { OrgContextGuard } from 'src/auth/org-context.guard';
+import { PermissionGuard, RequiredPermissions } from '../auth/permission.guard';
+import { PERMISSIONS } from 'src/common/constants/permissions';
 
 @Controller('telemetry')
-@UseGuards(JwtAuthGuard, RolesGuard)
+@UseGuards(JwtAuthGuard)
 export class TelemetryController {
   constructor(
     private readonly svc: TelemetryService,
@@ -28,7 +28,8 @@ export class TelemetryController {
   ) {}
 
   @Get('by-sensor/:id')
-  @Roles(UserRole.OWNER)
+  // @UseGuards(JwtAuthGuard, OrgContextGuard, PermissionGuard)
+  // @RequiredPermissions(PERMISSIONS.SENSORS.HISTORICAL)
   async bySensor(@Param('id') id: string, @Query() q: TelemetryQuery) {
     const rows = await this.svc.findBySensor(id, {
       from: q.from ? new Date(q.from) : undefined,
@@ -39,7 +40,8 @@ export class TelemetryController {
   }
 
   @Post('query')
-  @Roles(UserRole.OWNER)
+  // @UseGuards(JwtAuthGuard, OrgContextGuard, PermissionGuard)
+  // @RequiredPermissions(PERMISSIONS.SENSORS.HISTORICAL)
   async queryPost(@Body() body: TelemetryQueryBody) {
     const { sensorIds, timeRange, bucketSize } = body;
 

@@ -12,6 +12,9 @@ import { GatewaysModule } from './module/gateways/gateways.module';
 import { SensorsModule } from './module/sensors/sensors.module';
 import { NotificationsModule } from './module/notifications/notifications.module';
 import { RogueGatewaysModule } from './module/rogue-gateways/rogue-gateways.module';
+import { MembershipsModule } from './module/memberships/memberships.module';
+import { InvitesModule } from './module/invites/invites.module';
+import { MailModule } from './module/mail/mail.module';
 import { APP_GUARD } from '@nestjs/core';
 import { JwtAuthGuard } from './module/auth/jwt-auth.guard';
 import { RolesGuard } from './module/auth/roles.guard';
@@ -35,6 +38,9 @@ import { SettingsModule } from './module/settings/settings.module';
     SensorsModule,
     NotificationsModule,
     RogueGatewaysModule,
+    MembershipsModule,
+    InvitesModule,
+    MailModule,
     TelemetryModule,
     IotModule,
     RealtimeModule,

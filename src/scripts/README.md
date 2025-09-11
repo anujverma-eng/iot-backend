@@ -1,3 +1,22 @@
+# Scripts Directory
+
+This directory contains various scripts for seeding data, migrations, and IoT simulation.
+
+## Available Scripts
+
+### Seeding Scripts
+- `npm run seed:plans` - Seeds the plans collection with default plan data
+- `npm run seed:telemetry` - Seeds telemetry data for testing  
+- `npm run seed:org-gateway` - Seeds organizations and gateways
+
+### Migration Scripts
+- `npm run migrate:owner-memberships` - Creates membership records for existing owner users who don't have memberships
+
+### Simulation Scripts
+- `npm run sim:iot` - Runs the IoT device simulator
+
+---
+
 # IoT Simulator
 
 This directory contains scripts and services for simulating IoT device data transmission to test your IoT pipeline.

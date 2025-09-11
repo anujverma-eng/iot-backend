@@ -7,6 +7,8 @@ import {
   OrganizationSchema,
 } from '../organizations/organizations.schema';
 import { UsersController } from './users.controller';
+import { MembershipsModule } from '../memberships/memberships.module';
+import { InvitesModule } from '../invites/invites.module';
 
 @Module({
   imports: [
@@ -14,6 +16,8 @@ import { UsersController } from './users.controller';
       { name: User.name, schema: UserSchema },
       { name: Organization.name, schema: OrganizationSchema },
     ]),
+    MembershipsModule,
+    InvitesModule,
   ],
   controllers: [UsersController],
   providers: [UsersService],

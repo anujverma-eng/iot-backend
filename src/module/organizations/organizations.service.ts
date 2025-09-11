@@ -11,6 +11,7 @@ import { PlanName } from '../plans/enums/plan.enum';
 import { User, UserDocument } from '../users/users.schema';
 import { UserRole } from '../users/enums/users.enum';
 import { CreateOrganizationDto } from './dto/organization.dto';
+import { Membership, MembershipDocument, MembershipStatus } from '../memberships/memberships.schema';
 
 @Injectable()
 export class OrganizationsService {
@@ -21,17 +22,27 @@ export class OrganizationsService {
     private readonly planModel: Model<PlanDocument>,
     @InjectModel(User.name)
     private readonly userModel: Model<UserDocument>,
+    @InjectModel(Membership.name)
+    private readonly membershipModel: Model<MembershipDocument>,
   ) {}
 
   async createOrgAndSetOwner(
     ownerId: Types.ObjectId,
     dto: CreateOrganizationDto,
   ) {
-    /* ensure caller is not in an org already */
+    // Check if user already owns an organization
+    const hasOwnerMembership = await this.membershipModel.exists({
+      userId: ownerId,
+      role: UserRole.OWNER,
+      status: MembershipStatus.ACTIVE
+    });
+    
+    if (hasOwnerMembership) {
+      throw new BadRequestException('You already own an organization');
+    }
+
     const caller = await this.userModel.findById(ownerId).lean();
     if (!caller) throw new BadRequestException('User not found');
-    if (caller.orgId)
-      throw new BadRequestException('You already belong to an organization');
 
     const planToUse = dto?.planId
       ? await this.planModel.findById(dto.planId).lean()
@@ -56,10 +67,25 @@ export class OrganizationsService {
         { session },
       );
 
+      // Update user (legacy field for backward compatibility)
       await this.userModel.updateOne(
         { _id: ownerId },
         { $set: { orgId: org[0]._id, role: UserRole.OWNER } },
         { session },
+      );
+
+      // Create membership (new multi-org system)
+      await this.membershipModel.create(
+        [
+          {
+            userId: new Types.ObjectId(ownerId),
+            orgId: org[0]._id,
+            role: UserRole.OWNER,
+            status: MembershipStatus.ACTIVE,
+            acceptedAt: new Date(),
+          },
+        ],
+        { session }
       );
 
       await session.commitTransaction();
@@ -84,5 +110,29 @@ export class OrganizationsService {
 
     if (!org) throw new NotFoundException('Organization not found');
     return org;
+  }
+
+  /**
+   * Update organization
+   */
+  async updateOrganization(orgId: string, dto: { name?: string; domain?: string }) {
+    try {
+      const org = await this.orgModel.findByIdAndUpdate(
+        orgId,
+        { $set: dto },
+        { new: true, runValidators: true }
+      );
+
+      if (!org) {
+        throw new NotFoundException('Organization not found');
+      }
+
+      return org;
+    } catch (error) {
+      if (error.code === 11000) {
+        throw new BadRequestException('Organization name already exists');
+      }
+      throw new BadRequestException('Failed to update organization');
+    }
   }
 }

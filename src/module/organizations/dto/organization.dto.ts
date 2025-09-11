@@ -15,3 +15,9 @@ export class CreateOrganizationDto {
 }
 
 export class UpdateOrganizationDto extends CreateOrganizationDto {}
+
+export class UpdateOrganizationNameDto {
+  @IsString()
+  @Length(2, 60)
+  name: string;
+}

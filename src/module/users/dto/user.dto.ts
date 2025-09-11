@@ -4,6 +4,8 @@ import {
   IsMongoId,
   IsOptional,
   IsString,
+  IsPhoneNumber,
+  Length,
 } from 'class-validator';
 import { UserRole, UserStatus } from '../enums/users.enum';
 import { Expose, Transform } from 'class-transformer';
@@ -43,11 +45,41 @@ export class InviteUserDto {
   role: UserRole = UserRole.MEMBER;
 }
 
+export class UpdateUserProfileDto {
+  @IsOptional()
+  @IsString()
+  displayName?: string;
+}
+
+export class UpdateUserInfoDto {
+  @IsOptional()
+  @IsEmail()
+  email?: string;
+
+  @IsOptional()
+  @IsString()
+  @Length(1, 100)
+  fullName?: string;
+
+  @IsOptional()
+  @IsString()
+  phoneNumber?: string;
+
+  @IsOptional()
+  @IsString()
+  @Length(1, 10)
+  countryCode?: string;
+}
+
 export class MeDto {
   @Expose() _id: string;
   @Expose() email: string;
   @Expose() role: string;
   @Expose() orgId?: string | null;
+  @Expose() fullName?: string;
+  @Expose() phoneNumber?: string;
+  @Expose() countryCode?: string;
+  @Expose() displayName?: string;
 
   @Transform(() => undefined, { toPlainOnly: true })
   __v?: never;

@@ -13,6 +13,7 @@ import { UsersService } from '../users/users.service';
 import { User, UserSchema } from '../users/users.schema';
 import { Sensor, SensorSchema } from '../sensors/sensors.schema';
 import { Telemetry, TelemetrySchema } from '../telemetry/telemetry.schema';
+import { Membership, MembershipSchema } from '../memberships/memberships.schema';
 
 @Module({
   imports: [
@@ -22,6 +23,7 @@ import { Telemetry, TelemetrySchema } from '../telemetry/telemetry.schema';
       { name: User.name, schema: UserSchema },
       { name: Sensor.name, schema: SensorSchema },
       { name: Telemetry.name, schema: TelemetrySchema },
+      { name: Membership.name, schema: MembershipSchema },
     ]),
   ],
   controllers: [GatewaysController],

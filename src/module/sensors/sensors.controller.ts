@@ -11,6 +11,10 @@ import {
 } from '@nestjs/common';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { RolesGuard } from '../auth/roles.guard';
+import { PermissionGuard } from '../auth/permission.guard';
+import { RequiredPermissions } from '../auth/permission.guard';
+import { OrgContextGuard } from '../../auth/org-context.guard';
+import { PERMISSIONS } from '../../common/constants/permissions';
 import { SensorsService } from './sensors.service';
 import { plainToInstance } from 'class-transformer';
 import { ClaimSensorDto, SensorResponseDto } from './dto/sensor.dto';
@@ -19,26 +23,29 @@ import { Roles } from '../auth/roles.decorator';
 import { UserRole } from '../users/enums/users.enum';
 import { normLimit, normPage } from 'src/common/utils/pagination';
 import { SensorType } from './enums/sensor.enum';
+import { OrgContextUser } from '../../auth/org-context.guard';
+import { ObjectId } from 'mongodb';
 
 @Controller('sensors')
-@UseGuards(JwtAuthGuard, RolesGuard)
+@UseGuards(JwtAuthGuard, OrgContextGuard)
 export class SensorsController {
   constructor(private readonly svc: SensorsService) {}
 
   /** GET /sensors/by-gateway/:gatewayId */
-  @Roles(UserRole.OWNER)
+  @UseGuards(PermissionGuard)
+  @RequiredPermissions(PERMISSIONS.SENSORS.VIEW)
   @Get('by-gateway/:gatewayId')
   async listByGateway(
     @Param('gatewayId') gatewayId: string,
     @Query() q: { page?: string; limit?: string; claimed?: string },
-    @Req() req: any,
+    @Req() req: { user: OrgContextUser },
   ) {
     const page = normPage(q);
     const limit = normLimit(q, 50);
 
     const { rows, total } = await this.svc.paginateByGateway(
       gatewayId,
-      req.user.orgId,
+      new ObjectId(req.user.orgId!),
       { page, limit, claimed: q.claimed },
     );
 
@@ -56,8 +63,9 @@ export class SensorsController {
   }
 
   /** GET /sensors   – all sensors in my organization (paginated) */
+  @UseGuards(PermissionGuard)
+  @RequiredPermissions(PERMISSIONS.SENSORS.VIEW)
   @Get()
-  @Roles(UserRole.OWNER)
   async listAllMine(
     @Query()
     q: {
@@ -94,66 +102,73 @@ export class SensorsController {
   }
 
   /** POST /sensors/claim */
+  @UseGuards(PermissionGuard)
+  @RequiredPermissions(PERMISSIONS.SENSORS.ADD)
   @Post('claim')
-  @Roles(UserRole.OWNER)
-  async claim(@Req() req: any, @Body() dto: ClaimSensorDto) {
+  async claim(@Req() req: { user: OrgContextUser }, @Body() dto: ClaimSensorDto) {
     return this.svc.claimForUser(
-      { orgId: req.user.orgId, role: req.user.role },
+      { orgId: new ObjectId(req.user.orgId!), role: req.user.role as UserRole },
       dto,
     );
   }
 
   /** GET /sensors/stats  – simple dashboard card */
+  @UseGuards(PermissionGuard)
+  @RequiredPermissions(PERMISSIONS.SENSORS.VIEW)
   @Get('stats')
-  @Roles(UserRole.OWNER)
-  getStats(@Req() req: any) {
-    return this.svc.getStats(req.user.orgId);
+  getStats(@Req() req: { user: OrgContextUser }) {
+    return this.svc.getStats(new ObjectId(req.user.orgId!));
   }
 
-  @Roles(UserRole.OWNER)
+  @UseGuards(PermissionGuard)
+  @RequiredPermissions(PERMISSIONS.SENSORS.VIEW)
   @Get(':mac')
-  async getOne(@Param('mac') mac: string, @Req() req: any) {
-    return this.svc.getDetails(mac.toUpperCase(), req.user.orgId);
+  async getOne(@Param('mac') mac: string, @Req() req: { user: OrgContextUser }) {
+    return this.svc.getDetails(mac.toUpperCase(), new ObjectId(req.user.orgId!));
   }
 
   /** PATCH /sensors/:mac – rename / toggle fields (currently label only) */
+  @UseGuards(PermissionGuard)
+  @RequiredPermissions(PERMISSIONS.SENSORS.UPDATE)
   @Patch(':mac')
-  @Roles(UserRole.OWNER)
   updateSensor(
     @Param('mac') mac: string,
-    @Req() req: any,
+    @Req() req: { user: OrgContextUser },
     @Body() dto: { displayName?: string, isOnline?: boolean },
   ) {
-    return this.svc.updateSensor(mac.toUpperCase(), req.user.orgId, dto);
+    return this.svc.updateSensor(mac.toUpperCase(), new ObjectId(req.user.orgId!), dto);
   }
 
+  @UseGuards(PermissionGuard)
+  @RequiredPermissions(PERMISSIONS.SENSORS.UPDATE)
   @Post(':mac/favorite')
-  @Roles(UserRole.OWNER)
   addToFavorite(
     @Param('mac') mac: string,
-    @Req() req: any,
+    @Req() req: { user: OrgContextUser },
   ) {
-    return this.svc.addToFavorite(mac.toUpperCase(), req.user.orgId);
+    return this.svc.addToFavorite(mac.toUpperCase(), new ObjectId(req.user.orgId!));
   }
 
   /** POST /sensors/:mac/claim   */
+  @UseGuards(PermissionGuard)
+  @RequiredPermissions(PERMISSIONS.SENSORS.ADD)
   @Post(':mac/claim')
-  @Roles(UserRole.OWNER)
   claimSensor(
     @Param('mac') mac: string,
-    @Req() req: any,
+    @Req() req: { user: OrgContextUser },
     @Body('displayName') displayName?: string,
   ) {
     return this.svc.claimForUser(
-      { orgId: req.user.orgId, role: req.user.role },
+      { orgId: new ObjectId(req.user.orgId!), role: req.user.role as UserRole },
       { mac, displayName },
     );
   }
 
   /** POST /sensors/:mac/unclaim  */
+  @UseGuards(PermissionGuard)
+  @RequiredPermissions(PERMISSIONS.SENSORS.DELETE)
   @Post(':mac/unclaim')
-  @Roles(UserRole.OWNER)
-  unclaimSensor(@Param('mac') mac: string, @Req() req: any) {
-    return this.svc.unclaim(mac.toUpperCase(), req.user.orgId);
+  unclaimSensor(@Param('mac') mac: string, @Req() req: { user: OrgContextUser }) {
+    return this.svc.unclaim(mac.toUpperCase(), new ObjectId(req.user.orgId!));
   }
 }

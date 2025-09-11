@@ -170,9 +170,13 @@ export class SensorsService {
   ) {
     const { page, limit, claimed, search, sort, dir, type } = opts;
 
+    // if orgId is not of type ObjectId, convert it
+    if (!(orgId instanceof Types.ObjectId)) {
+      orgId = new Types.ObjectId(orgId);
+    }
     // 1. find all gateway IDs for this org
     const gateways = await this.gwModel.find({ orgId }, { _id: 1 }).lean();
-    const gatewayIds = gateways.map((gw) => gw._id);
+    // const gatewayIds = gateways.map((gw) => gw._id);
 
     // 2. build the “base” query for sensors in those gateways
     const base: any = {
