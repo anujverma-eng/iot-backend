@@ -45,9 +45,9 @@ export class SensorsService {
 
       // First pass: Update the sensors array in memory and collect changes for DB
       for (const sensor of sensors) {
-        if (!sensor.updatedAt) continue;
+        if (!sensor.lastSeen) continue;
 
-        const lastUpdated = new Date(sensor.updatedAt);
+        const lastUpdated = new Date(sensor.lastSeen);
         const timeDifference = currentTime.getTime() - lastUpdated.getTime();
         
         // If time difference is greater than timeout, sensor should be offline
@@ -175,7 +175,7 @@ export class SensorsService {
       orgId = new Types.ObjectId(orgId);
     }
     // 1. find all gateway IDs for this org
-    const gateways = await this.gwModel.find({ orgId }, { _id: 1 }).lean();
+    // const gateways = await this.gwModel.find({ orgId }, { _id: 1 }).lean();
     // const gatewayIds = gateways.map((gw) => gw._id);
 
     // 2. build the “base” query for sensors in those gateways
