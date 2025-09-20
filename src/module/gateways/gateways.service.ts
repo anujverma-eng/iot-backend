@@ -281,12 +281,15 @@ export class GatewaysService {
   }
 
   /** stats for quick dashboard tiles */
-  async getStats(orgId: string) {
+  async getStats(orgId) {
+    orgId = new Types.ObjectId(orgId);
+
+    // Use countDocuments for accurate counts
     const [totals, live] = await Promise.all([
       this.gwModel.countDocuments({ orgId }),
       this.gwModel.countDocuments({
         orgId,
-        lastSeen: { $gte: new Date(Date.now() - 5 * 60_000) }, // seen in 5 min
+        isConnected: true,
       }),
     ]);
     return { totalGateways: totals, liveGateways: live };
