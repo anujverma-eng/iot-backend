@@ -4,6 +4,7 @@ import { MongooseModule } from '@nestjs/mongoose';
 import { Telemetry, TelemetrySchema } from './telemetry.schema';
 import { TelemetryController } from './telemetry.controller';
 import { TelemetryService } from './telemetry.service';
+import { TelemetryOptimizerService } from './telemetry-optimizer.service';
 import { UsersService } from '../users/users.service';
 import { User, UserSchema } from '../users/users.schema';
 import {
@@ -27,7 +28,7 @@ import { SettingsModule } from '../settings/settings.module';
     SettingsModule,
   ],
   controllers: [TelemetryController],
-  providers: [TelemetryService, UsersService, SensorsService, SettingsService],
+  providers: [TelemetryService, TelemetryOptimizerService, UsersService, SensorsService, SettingsService],
   exports: [MongooseModule, TelemetryService],
 })
 export class TelemetryModule {}
