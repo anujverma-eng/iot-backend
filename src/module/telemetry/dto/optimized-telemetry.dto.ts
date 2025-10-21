@@ -113,7 +113,7 @@ export interface OptimizedDataPoint {
 export interface OptimizationInfo {
   originalCount: number;
   optimizedCount: number;
-  strategy: 'none' | 'statistical-sampling' | 'lod-sampling' | 'adaptive-sampling' | 'time-bucket-aggregation' | 'sliding-window' | 'database-optimized';
+  strategy: 'none' | 'statistical-sampling' | 'lod-sampling' | 'adaptive-sampling' | 'time-bucket-aggregation' | 'sliding-window' | 'database-optimized' | 'time-aligned-sampling' | 'intersection-based-sampling';
 }
 
 export interface OptimizedSensorData {

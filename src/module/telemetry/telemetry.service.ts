@@ -177,8 +177,40 @@ export class TelemetryService {
     // Calculate sampling ratio
     const samplingRatio = Math.min(1, targetPoints / totalCount);
     
-    // 🚀 NEW PRIORITY LOGIC: Always try statistical sampling first to respect target points
+    // 🔍 SMART DETECTION: For multiple sensors, check if this is a comparison query
+    const sensorIds = match.sensorId?.$in || [];
+    const isComparison = Array.isArray(sensorIds) && sensorIds.length > 1;
     
+    console.log(`\n🔍 === OPTIMIZATION STRATEGY SELECTION ===`);
+    console.log(`📊 Total data points: ${totalCount}, Target: ${targetPoints}`);
+    console.log(`🎛️ Sensors in query: ${JSON.stringify(sensorIds)}`);
+    console.log(`🎯 Is comparison mode? ${isComparison} (${sensorIds.length} sensors)`);
+    
+    if (isComparison) {
+      console.log(`🎯 COMPARISON MODE: Detected ${sensorIds.length} sensors, using intersection-based sampling`);
+      console.log(`📝 Sensor IDs: ${sensorIds.join(', ')}`);
+      
+      try {
+        const intersectionResult = await this.intersectionBasedSampling(match, targetPoints);
+        const successThreshold = targetPoints * 0.2; // Lower threshold for intersection - even 20% is valuable
+        
+        console.log(`📊 Intersection result: ${intersectionResult.length} points (threshold: ${successThreshold})`);
+        
+        if (intersectionResult.length >= successThreshold) {
+          console.log(`✅ Intersection-based sampling successful: ${intersectionResult.length} points`);
+          console.log(`🏁 === USING INTERSECTION-BASED STRATEGY ===\n`);
+          return intersectionResult;
+        } else {
+          console.log(`⚠️ Intersection-based sampling returned too few points: ${intersectionResult.length} < ${successThreshold}`);
+          console.log(`🔄 Will fall back to statistical sampling for comparison mode`);
+        }
+      } catch (error) {
+        console.log(`❌ Intersection-based sampling failed: ${error.message}`);
+        console.log(`📋 Stack trace:`, error.stack);
+      }
+    }
+    
+    // 🚀 FALLBACK: Standard sampling logic
     try {
       const statisticalResult = await this.statisticalSamplingPipeline(match, targetPoints);
       
@@ -218,6 +250,183 @@ export class TelemetryService {
 
     
     const result = await this.telModel.aggregate(pipeline).exec();
+    
+    return result;
+  }
+
+  /**
+   * 🎯 INTERSECTION-BASED COMPARISON SAMPLING
+   * Finds actual common timestamps where both sensors have data
+   * Then applies existing optimization on the intersection for true comparative analysis
+   */
+  private async intersectionBasedSampling(match: any, targetPoints: number) {
+    console.log(`\n🎯 === INTERSECTION-BASED COMPARISON START ===`);
+    console.log(`🔍 Target points requested: ${targetPoints}`);
+    
+    const sensorIds = match.sensorId?.$in || [];
+    if (sensorIds.length < 2) {
+      console.log(`❌ Need at least 2 sensors for intersection analysis`);
+      return [];
+    }
+    
+    console.log(`📊 Finding common timestamps for sensors: [${sensorIds.join(', ')}]`);
+    console.log(`📋 Match condition:`, JSON.stringify(match, null, 2));
+    
+    // Step 1: Find all unique timestamps where we have data from ALL sensors
+    const intersectionPipeline: PipelineStage[] = [
+      { $match: match },
+      
+      // Group by timestamp and collect which sensors have data at each time
+      {
+        $group: {
+          _id: '$ts', // Group by exact timestamp
+          sensorsPresent: { $addToSet: '$sensorId' },
+          sensorData: {
+            $push: {
+              sensorId: '$sensorId',
+              value: '$value'
+            }
+          }
+        }
+      },
+      
+      // Only keep timestamps where ALL sensors have data
+      {
+        $match: {
+          $expr: {
+            $eq: [{ $size: '$sensorsPresent' }, sensorIds.length]
+          }
+        }
+      },
+      
+      // Sort by timestamp
+      { $sort: { '_id': 1 } },
+      
+      // Project to clean format
+      {
+        $project: {
+          _id: 0,
+          ts: '$_id',
+          sensorData: 1
+        }
+      }
+    ];
+    
+    console.log(`🔍 Executing intersection pipeline...`);
+    console.log(`📋 Pipeline:`, JSON.stringify(intersectionPipeline, null, 2));
+    
+    const intersectionResult = await this.telModel.aggregate(intersectionPipeline).exec();
+    
+    console.log(`📊 Raw intersection result length: ${intersectionResult?.length || 0}`);
+    console.log(`📊 First few intersection results:`, intersectionResult?.slice(0, 3));
+    
+    if (!intersectionResult || intersectionResult.length === 0) {
+      console.log(`❌ No common timestamps found between sensors`);
+      
+      // Debug: Let's see what we do have for each sensor individually
+      console.log(`🔍 Debugging - checking individual sensor data...`);
+      for (const sensorId of sensorIds) {
+        const sensorMatch = { ...match, sensorId: sensorId };
+        const sensorCount = await this.telModel.countDocuments(sensorMatch);
+        const sampleData = await this.telModel.find(sensorMatch).limit(3).sort({ ts: 1 });
+        console.log(`   📈 Sensor ${sensorId}: ${sensorCount} total records`);
+        console.log(`   📝 Sample timestamps:`, sampleData.map(d => d.ts.toISOString()));
+      }
+      
+      console.log(`🔄 Falling back to individual sensor optimization`);
+      return [];
+    }
+    
+    console.log(`✅ Found ${intersectionResult.length} common timestamps`);
+    
+    // Step 2: Apply existing optimization on the intersection data
+    let optimizedIntersection;
+    
+    if (intersectionResult.length <= targetPoints) {
+      // If intersection is already small enough, return all
+      console.log(`✅ Intersection size (${intersectionResult.length}) <= target (${targetPoints}), returning all common points`);
+      optimizedIntersection = intersectionResult;
+    } else {
+      // Apply statistical sampling on intersection data
+      console.log(`🔧 Intersection too large (${intersectionResult.length} > ${targetPoints}), applying optimization`);
+      
+      const samplingRatio = targetPoints / intersectionResult.length;
+      const sampleSize = Math.floor(intersectionResult.length * samplingRatio);
+      
+      console.log(`📊 Sampling ${sampleSize} points from ${intersectionResult.length} common timestamps`);
+      
+      // Use existing statistical sampling logic
+      const indices = new Set<number>();
+      while (indices.size < sampleSize) {
+        indices.add(Math.floor(Math.random() * intersectionResult.length));
+      }
+      
+      optimizedIntersection = Array.from(indices)
+        .sort((a, b) => a - b)
+        .map(i => intersectionResult[i]);
+    }
+    
+    // Step 3: Transform to expected format
+    const result: any[] = [];
+    
+    optimizedIntersection.forEach(point => {
+      point.sensorData.forEach((sensor: any) => {
+        result.push({
+          sensorId: sensor.sensorId,
+          ts: point.ts,
+          value: sensor.value
+        });
+      });
+    });
+    
+    // Sort by timestamp to maintain chronological order
+    result.sort((a, b) => a.ts.getTime() - b.ts.getTime());
+    
+    // Analyze final results by sensor
+    const sensorResults = new Map<string, number>();
+    result.forEach(point => {
+      const count = sensorResults.get(point.sensorId) || 0;
+      sensorResults.set(point.sensorId, count + 1);
+    });
+    
+    console.log(`✅ Intersection-based comparison results:`);
+    console.log(`   📊 Total comparative points: ${result.length}`);
+    console.log(`   🕐 Common timestamps used: ${optimizedIntersection.length}`);
+    sensorResults.forEach((count, sensorId) => {
+      console.log(`   📈 ${sensorId}: ${count} points`);
+    });
+    
+    // Show sample data in table format for comparison validation
+    if (result.length > 0) {
+      console.log(`📝 Sample comparative points (showing synchronized data):`);
+      const sampleCount = Math.min(5, optimizedIntersection.length);
+      
+      // Create table data for console.table
+      const tableData: any[] = [];
+      
+      for (let i = 0; i < sampleCount; i++) {
+        const timestamp = optimizedIntersection[i].ts.toISOString();
+        const sensorsAtTime = result.filter(p => p.ts.getTime() === optimizedIntersection[i].ts.getTime());
+        
+        const rowData: any = {
+          timestamp: timestamp,
+        };
+        
+        // Add each sensor's value as a column
+        sensorsAtTime.forEach(sensor => {
+          rowData[`${sensor.sensorId}_value`] = sensor.value;
+        });
+        
+        tableData.push(rowData);
+      }
+      
+      console.log(`\n📊 === COMPARISON DATA VALIDATION TABLE ===`);
+      console.table(tableData);
+      console.log(`🔍 This table shows that we have synchronized sensor readings at exact same timestamps`);
+      console.log(`✅ Each row represents a point in time where both sensors have actual measurements`);
+    }
+    
+    console.log(`🏁 === INTERSECTION-BASED COMPARISON END ===\n`);
     
     return result;
   }
@@ -490,6 +699,489 @@ export class TelemetryService {
    */
   async findForSummary(query: any, projection: any = { value: 1, _id: 0 }) {
     return this.telModel.find(query, projection).lean();
+  }
+
+  /**
+   * 📥 BULK EXPORT: Estimate export size and duration
+   */
+  async estimateExportSize(params: {
+    sensorIds: string[];
+    timeRange: { start: Date; end: Date };
+    format?: string;
+    includeMetadata?: boolean;
+  }) {
+    const match = {
+      sensorId: { $in: params.sensorIds },
+      ts: { $gte: params.timeRange.start, $lte: params.timeRange.end }
+    };
+
+    const [countResult] = await this.telModel.aggregate([
+      { $match: match },
+      { $count: "totalRecords" }
+    ]).exec();
+
+    const totalRecords = countResult?.totalRecords || 0;
+    
+    // 🎯 REALISTIC ESTIMATION based on actual performance data
+    // Real-world performance: ~2000-2500 records/second for streaming CSV export
+    // Factors: DB cursor pagination + CSV formatting + network streaming + memory management
+    
+    let recordsPerSecond: number;
+    let baselineSeconds: number;
+    
+    if (totalRecords < 10000) {
+      // Small datasets: Higher throughput due to minimal overhead
+      recordsPerSecond = 5000;
+      baselineSeconds = 2; // Minimum processing time
+    } else if (totalRecords < 50000) {
+      // Medium datasets: Good throughput
+      recordsPerSecond = 3000;
+      baselineSeconds = 5;
+    } else if (totalRecords < 200000) {
+      // Large datasets: MongoDB cursor overhead becomes significant
+      recordsPerSecond = 2500;
+      baselineSeconds = 10;
+    } else {
+      // Very large datasets: Memory pressure + extensive cursor pagination
+      recordsPerSecond = 2000;
+      baselineSeconds = 15;
+    }
+    
+    // Calculate with overhead factors
+    const processingTime = Math.ceil(totalRecords / recordsPerSecond);
+    const estimatedSeconds = Math.max(baselineSeconds, processingTime);
+    
+    // Add buffer for network/formatting overhead (20% more time)
+    const finalEstimateSeconds = Math.ceil(estimatedSeconds * 1.2);
+    
+    // 📏 ACCURATE SIZE CALCULATION using the same logic as export
+    const format = params.format || 'csv';
+    const includeMetadata = params.includeMetadata !== false;
+    
+    const accurateContentSize = await this.calculateExportSize({
+      sensorIds: params.sensorIds,
+      timeRange: params.timeRange,
+      format,
+      includeMetadata,
+      estimatedRecords: totalRecords
+    });
+    
+    const estimatedSizeKB = Math.ceil(accurateContentSize / 1024);
+    
+    return {
+      totalRecords,
+      estimatedDuration: this.formatDuration(finalEstimateSeconds),
+      estimatedSizeKB: estimatedSizeKB,
+      estimatedSizeBytes: accurateContentSize,
+      recommendedBatchSize: Math.min(10000, Math.max(1000, Math.floor(totalRecords / 10))),
+      performanceNote: `Estimated at ${recordsPerSecond} records/sec + ${Math.ceil((finalEstimateSeconds - estimatedSeconds) / finalEstimateSeconds * 100)}% overhead`,
+      sizeCalculation: `${format.toUpperCase()} format with ${includeMetadata ? 'metadata' : 'no metadata'}`
+    };
+  }
+
+  /**
+   * 🔄 STREAMING EXPORT: Get data in cursor-based chunks for streaming
+   */
+  async getExportChunk(params: {
+    sensorIds: string[];
+    timeRange: { start: Date; end: Date };
+    batchSize: number;
+    lastId?: string;
+  }) {
+    const match: any = {
+      sensorId: { $in: params.sensorIds },
+      ts: { $gte: params.timeRange.start, $lte: params.timeRange.end }
+    };
+
+    // Cursor-based pagination using _id for efficiency
+    if (params.lastId) {
+      // Convert string back to ObjectId for proper MongoDB comparison
+      const { ObjectId } = require('mongoose').Types;
+      match._id = { $gt: new ObjectId(params.lastId) };
+      console.log(`🔍 Using cursor pagination: lastId=${params.lastId.substring(0, 8)}...`);
+    } else {
+      console.log(`🔍 Starting fresh query (no lastId)`);
+    }
+
+    console.log(`📋 Query match:`, JSON.stringify(match, null, 2));
+    console.log(`📊 Requesting ${params.batchSize} records...`);
+
+    // Optimize query for streaming performance
+    const results = await this.telModel
+      .find(match, { 
+        _id: 1,
+        sensorId: 1,
+        ts: 1,
+        value: 1
+      })
+      .sort({ _id: 1 })
+      .limit(params.batchSize)
+      .lean()
+      .hint({ _id: 1 }) // Force index on _id for optimal cursor performance
+      .exec();
+
+    const lastId = results.length > 0 ? results[results.length - 1]._id.toString() : null;
+    const hasMore = results.length === params.batchSize;
+
+    console.log(`✅ Query results: ${results.length} records returned, hasMore=${hasMore}`);
+    console.log(`🔗 New lastId: ${lastId?.substring(0, 8)}...`);
+
+    return {
+      data: results.map(row => ({
+        sensorId: row.sensorId,
+        timestamp: row.ts.toISOString(),
+        value: row.value
+      })),
+      lastId,
+      hasMore,
+      count: results.length
+    };
+  }
+
+  /**
+   * 📊 METADATA: Get sensor metadata for export
+   */
+  async getExportMetadata(sensorIds: string[]) {
+    const pipeline = [
+      { $match: { sensorId: { $in: sensorIds } } },
+      {
+        $group: {
+          _id: '$sensorId',
+          firstReading: { $min: '$ts' },
+          lastReading: { $max: '$ts' },
+          totalReadings: { $sum: 1 },
+          minValue: { $min: '$value' },
+          maxValue: { $max: '$value' },
+          avgValue: { $avg: '$value' }
+        }
+      }
+    ];
+
+    const metadata = await this.telModel.aggregate(pipeline).exec();
+    return metadata.map(meta => ({
+      sensorId: meta._id,
+      firstReading: meta.firstReading?.toISOString(),
+      lastReading: meta.lastReading?.toISOString(),
+      totalReadings: meta.totalReadings,
+      valueRange: {
+        min: meta.minValue,
+        max: meta.maxValue,
+        avg: Math.round(meta.avgValue * 100) / 100
+      }
+    }));
+  }
+
+  /**
+   * 📏 CALCULATE EXPORT SIZE: Pre-calculate exact content length
+   * For small datasets (<1000 records): Calculate exactly by processing all data
+   * For large datasets: Use sampling with improved accuracy
+   */
+  async calculateExportSize(params: {
+    sensorIds: string[];
+    timeRange: { start: Date; end: Date };
+    format: string;
+    includeMetadata: boolean;
+    estimatedRecords: number;
+  }) {
+    const { format, includeMetadata, estimatedRecords, sensorIds, timeRange } = params;
+    
+    console.log(`🔍 SIZE CALCULATION DEBUG:`);
+    console.log(`   Format: ${format}`);
+    console.log(`   Include Metadata: ${includeMetadata}`);
+    console.log(`   Estimated Records: ${estimatedRecords.toLocaleString()}`);
+    
+    // 🎯 EXACT CALCULATION for small datasets
+    if (estimatedRecords <= 1000) {
+      console.log(`   💯 Using EXACT calculation (dataset ≤ 1000 records)`);
+      return this.calculateExactSize({ sensorIds, timeRange, format, includeMetadata });
+    }
+    
+    // 🎯 SAMPLING for large datasets - use fast fallback for very large datasets
+    if (estimatedRecords > 50000) {
+      console.log(`   ⚡ Very large dataset (${estimatedRecords.toLocaleString()}) - using fast estimation`);
+      // Use fixed average sizes for very large datasets to avoid expensive queries
+      const avgRecordSize = format === 'csv' ? 
+        (includeMetadata ? 120 : 60) : 
+        (includeMetadata ? 180 : 95);
+      
+      const projectedSize = estimatedRecords * avgRecordSize;
+      const finalSize = Math.ceil(projectedSize * 1.02); // 2% buffer
+      
+      console.log(`   ⚡ Fast estimation: ${avgRecordSize} bytes/record × ${estimatedRecords} = ${finalSize.toLocaleString()} bytes`);
+      return finalSize;
+    }
+    
+    console.log(`   📊 Using SAMPLING calculation (dataset > 1000 records)`);
+    const sampleSize = Math.min(50, estimatedRecords); // Reduce sample size for performance
+    const sampleData = await this.telModel
+      .find({
+        sensorId: { $in: sensorIds },
+        ts: { $gte: timeRange.start, $lte: timeRange.end }
+      })
+      .limit(sampleSize)
+      .lean()
+      .exec();
+    
+    if (sampleData.length === 0) {
+      console.log(`⚠️ No sample data found, using fallback estimation`);
+      return 1000; // Fallback minimal size
+    }
+    
+    console.log(`   📊 Sample size: ${sampleData.length} records`);
+    
+    // Calculate sizes based on actual data
+    let totalSampleSize = 0;
+    
+    if (format === 'csv') {
+      // CSV Header
+      const headerSize = includeMetadata 
+        ? 'sensorId,timestamp,value,metadata\n'.length
+        : 'sensorId,timestamp,value\n'.length;
+      
+      totalSampleSize += headerSize;
+      
+      // Get metadata if needed
+      let metadata: any = {};
+      if (includeMetadata) {
+        const metaArray = await this.getExportMetadata(sensorIds);
+        metadata = metaArray.reduce((acc, meta) => {
+          acc[meta.sensorId] = meta;
+          return acc;
+        }, {});
+      }
+      
+      // Calculate actual row sizes
+      sampleData.forEach(row => {
+        if (includeMetadata && metadata[row.sensorId]) {
+          const metaStr = JSON.stringify(metadata[row.sensorId]).replace(/"/g, '""');
+          const csvRow = `"${row.sensorId}","${row.ts.toISOString()}",${row.value},"${metaStr}"\n`;
+          totalSampleSize += csvRow.length;
+        } else {
+          const csvRow = `"${row.sensorId}","${row.ts.toISOString()}",${row.value}\n`;
+          totalSampleSize += csvRow.length;
+        }
+      });
+      
+    } else if (format === 'json') {
+      // JSON wrapper
+      totalSampleSize += '{"data":['.length + ']}'.length;
+      
+      // Get metadata if needed
+      let metadata: any = {};
+      if (includeMetadata) {
+        const metaArray = await this.getExportMetadata(sensorIds);
+        metadata = metaArray.reduce((acc, meta) => {
+          acc[meta.sensorId] = meta;
+          return acc;
+        }, {});
+      }
+      
+      // Calculate actual JSON object sizes
+      sampleData.forEach((row, index) => {
+        const jsonRow = includeMetadata 
+          ? {
+              sensorId: row.sensorId,
+              timestamp: row.ts.toISOString(),
+              value: row.value,
+              metadata: metadata[row.sensorId]
+            }
+          : {
+              sensorId: row.sensorId,
+              timestamp: row.ts.toISOString(),
+              value: row.value
+            };
+        
+        const jsonString = JSON.stringify(jsonRow);
+        totalSampleSize += jsonString.length;
+        
+        // Add comma except for last item
+        if (index < sampleData.length - 1) {
+          totalSampleSize += 1; // comma
+        }
+      });
+      
+    } else if (format === 'jsonl') {
+      // Get metadata if needed
+      let metadata: any = {};
+      if (includeMetadata) {
+        const metaArray = await this.getExportMetadata(sensorIds);
+        metadata = metaArray.reduce((acc, meta) => {
+          acc[meta.sensorId] = meta;
+          return acc;
+        }, {});
+      }
+      
+      // Calculate JSONL sizes
+      sampleData.forEach(row => {
+        const jsonRow = includeMetadata 
+          ? {
+              sensorId: row.sensorId,
+              timestamp: row.ts.toISOString(),
+              value: row.value,
+              metadata: metadata[row.sensorId]
+            }
+          : {
+              sensorId: row.sensorId,
+              timestamp: row.ts.toISOString(),
+              value: row.value
+            };
+        
+        const jsonLine = JSON.stringify(jsonRow) + '\n';
+        totalSampleSize += jsonLine.length;
+      });
+    }
+    
+    // Calculate average size per record
+    const avgRecordSize = totalSampleSize / Math.max(sampleData.length, 1);
+    
+    // Project total size based on sample average
+    let projectedSize;
+    if (format === 'csv') {
+      const headerSize = includeMetadata 
+        ? 'sensorId,timestamp,value,metadata\n'.length
+        : 'sensorId,timestamp,value\n'.length;
+      const recordsSize = (estimatedRecords * avgRecordSize * sampleData.length) / sampleSize;
+      projectedSize = headerSize + recordsSize;
+    } else {
+      projectedSize = (estimatedRecords * avgRecordSize * sampleData.length) / sampleSize;
+    }
+    
+    console.log(`   📏 Sample calculation:`);
+    console.log(`   📊 Sample total size: ${totalSampleSize} bytes`);
+    console.log(`   📊 Average per record: ${avgRecordSize.toFixed(2)} bytes`);
+    console.log(`   📊 Projected total: ${projectedSize.toFixed(0)} bytes`);
+    
+    // 🎯 CONSERVATIVE SIZING: Use smaller buffer for better accuracy
+    // For small datasets (<1000 records), use minimal buffer
+    // For large datasets, use slightly larger buffer for safety
+    const bufferPercentage = estimatedRecords < 1000 ? 1.01 : 1.03; // 1% vs 3%
+    const finalSize = Math.ceil(projectedSize * bufferPercentage);
+    
+    console.log(`   💾 SIZE CALCULATION RESULT:`);
+    console.log(`   📊 Base projected size: ${projectedSize.toFixed(0).toLocaleString()} bytes`);
+    console.log(`   📊 Buffer applied: ${((bufferPercentage - 1) * 100).toFixed(1)}% (${estimatedRecords < 1000 ? 'small dataset' : 'large dataset'})`);
+    console.log(`   📈 Final size (with buffer): ${finalSize.toLocaleString()} bytes`);
+    console.log(`   📋 Final size in KB: ${Math.ceil(finalSize / 1024).toLocaleString()} KB`);
+    
+    return finalSize;
+  }
+
+  /**
+   * 🎯 EXACT SIZE CALCULATION: Calculate precise content length for small datasets
+   */
+  private async calculateExactSize(params: {
+    sensorIds: string[];
+    timeRange: { start: Date; end: Date };
+    format: string;
+    includeMetadata: boolean;
+  }) {
+    const { format, includeMetadata, sensorIds, timeRange } = params;
+    
+    console.log(`   🔬 EXACT CALCULATION: Processing all records...`);
+    
+    // Get all data (since it's small dataset ≤ 1000 records)
+    const allData = await this.telModel
+      .find({
+        sensorId: { $in: sensorIds },
+        ts: { $gte: timeRange.start, $lte: timeRange.end }
+      })
+      .lean()
+      .exec();
+    
+    console.log(`   📊 Exact record count: ${allData.length}`);
+    
+    if (allData.length === 0) {
+      return 50; // Empty response size
+    }
+    
+    let totalSize = 0;
+    
+    // Get metadata if needed
+    let metadata: any = {};
+    if (includeMetadata) {
+      const metaArray = await this.getExportMetadata(sensorIds);
+      metadata = metaArray.reduce((acc, meta) => {
+        acc[meta.sensorId] = meta;
+        return acc;
+      }, {});
+    }
+    
+    if (format === 'csv') {
+      // CSV Header
+      const csvHeader = includeMetadata 
+        ? 'sensorId,timestamp,value,metadata\n'
+        : 'sensorId,timestamp,value\n';
+      totalSize += csvHeader.length;
+      
+      // Calculate exact size for each row
+      allData.forEach(row => {
+        if (includeMetadata && metadata[row.sensorId]) {
+          const metaStr = JSON.stringify(metadata[row.sensorId]).replace(/"/g, '""');
+          const csvRow = `"${row.sensorId}","${row.ts.toISOString()}",${row.value},"${metaStr}"\n`;
+          totalSize += csvRow.length;
+        } else {
+          const csvRow = `"${row.sensorId}","${row.ts.toISOString()}",${row.value}\n`;
+          totalSize += csvRow.length;
+        }
+      });
+      
+    } else if (format === 'json') {
+      // JSON wrapper
+      totalSize += '{"data":['.length + ']}'.length;
+      
+      // Calculate exact size for each JSON object
+      allData.forEach((row, index) => {
+        const jsonRow = includeMetadata 
+          ? {
+              sensorId: row.sensorId,
+              timestamp: row.ts.toISOString(),
+              value: row.value,
+              metadata: metadata[row.sensorId]
+            }
+          : {
+              sensorId: row.sensorId,
+              timestamp: row.ts.toISOString(),
+              value: row.value
+            };
+        
+        const jsonString = JSON.stringify(jsonRow);
+        totalSize += jsonString.length;
+        
+        // Add comma except for last item
+        if (index < allData.length - 1) {
+          totalSize += 1; // comma
+        }
+      });
+      
+    } else if (format === 'jsonl') {
+      // Calculate JSONL sizes
+      allData.forEach(row => {
+        const jsonRow = includeMetadata 
+          ? {
+              sensorId: row.sensorId,
+              timestamp: row.ts.toISOString(),
+              value: row.value,
+              metadata: metadata[row.sensorId]
+            }
+          : {
+              sensorId: row.sensorId,
+              timestamp: row.ts.toISOString(),
+              value: row.value
+            };
+        
+        const jsonLine = JSON.stringify(jsonRow) + '\n';
+        totalSize += jsonLine.length;
+      });
+    }
+    
+    console.log(`   🎯 EXACT SIZE RESULT: ${totalSize} bytes (no buffer needed)`);
+    return totalSize;
+  }
+
+  private formatDuration(seconds: number): string {
+    if (seconds < 60) return `${seconds}s`;
+    if (seconds < 3600) return `${Math.ceil(seconds / 60)}m`;
+    return `${Math.ceil(seconds / 3600)}h`;
   }
 
   /**

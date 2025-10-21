@@ -7,7 +7,11 @@ import {
   Post,
   Query,
   UseGuards,
+  Res,
+  StreamableFile,
+  Header,
 } from '@nestjs/common';
+import { Response } from 'express';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { Roles } from '../auth/roles.decorator';
 import { RolesGuard } from '../auth/roles.guard';
@@ -20,8 +24,18 @@ import {
   OptimizedSensorData,
   TableSensorData,
   PaginationInfo,
-  TableDataSummary
+  TableDataSummary,
+  OptimizationInfo
 } from './dto/optimized-telemetry.dto';
+import {
+  BulkExportQueryDto,
+  ExportStatusQueryDto,
+  ExportFormat,
+  ExportMode,
+  StreamingExportResponse,
+  BackgroundExportResponse,
+  ExportProgress
+} from './dto/bulk-export.dto';
 import { TelemetryService } from './telemetry.service';
 import { TelemetryOptimizerService } from './telemetry-optimizer.service';
 import { OrgContextGuard } from 'src/auth/org-context.guard';
@@ -116,6 +130,18 @@ export class TelemetryController {
     const startTime = Date.now();
     const { sensorIds, timeRange, targetPoints, deviceType = 'desktop', liveMode } = body;
 
+    console.log('\n🚀 === OPTIMIZED TELEMETRY QUERY START ===');
+    console.log('📝 Full Request Body:', JSON.stringify(body, null, 2));
+    console.log('🎯 Parsed Request:', { 
+      sensorIds: `[${sensorIds.join(', ')}] (${sensorIds.length} sensors)`, 
+      timeRange: `${timeRange.start} -> ${timeRange.end}`,
+      timeSpanDays: Math.round((new Date(timeRange.end).getTime() - new Date(timeRange.start).getTime()) / (24*60*60*1000)),
+      targetPoints, 
+      deviceType, 
+      liveMode,
+      isComparison: sensorIds.length > 1
+    });
+
 
     // Live mode override - limit to max 100 points regardless of request
     const effectiveTargetPoints = liveMode?.enabled ? 
@@ -205,6 +231,9 @@ export class TelemetryController {
       const avg = values.reduce((sum, v) => sum + v, 0) / values.length;
       const current = rows[rows.length - 1]?.value ?? null;
 
+      // 🔍 SMART STRATEGY DETECTION: Detect which optimization was used
+      const strategy = this.detectOptimizationStrategy(rows, sensorIds.length, effectiveTargetPoints);
+
       return {
         sensorId: id,
         mac: meta[id]?.mac ?? '',
@@ -221,16 +250,117 @@ export class TelemetryController {
         optimization: {
           originalCount: originalCount,
           optimizedCount: rows.length,
-          strategy: 'database-optimized' as const
+          strategy: strategy
         }
       };
     });
 
     const processingTime = Date.now() - startTime;
+    
+    console.log('\n📊 === FINAL RESULTS SUMMARY ===');
+    
+    // Check if this is truly comparative data (same number of points for each sensor)
+    const isComparativeData = data.length > 1 && new Set(data.map(s => s.data.length)).size === 1;
+    
+    if (isComparativeData) {
+      console.log('🎯 === COMPARATIVE DATA DETECTED ===');
+      console.log(`✅ All ${data.length} sensors have exactly ${data[0].data.length} synchronized data points`);
+      console.log(`🕐 This indicates true comparative analysis data with aligned timestamps`);
+      
+      // Show comparison table for first few points
+      if (data[0].data.length > 0) {
+        console.log(`\n📊 === COMPARISON VALIDATION TABLE ===`);
+        const comparisonTable: any[] = [];
+        const sampleCount = Math.min(3, data[0].data.length);
+        
+        for (let i = 0; i < sampleCount; i++) {
+          const rowData: any = {
+            timestamp: data[0].data[i].timestamp
+          };
+          
+          data.forEach((sensor, sensorIndex) => {
+            rowData[`Sensor_${sensorIndex + 1}_${sensor.sensorId.substring(0, 8)}`] = sensor.data[i].value;
+          });
+          
+          comparisonTable.push(rowData);
+        }
+        
+        console.table(comparisonTable);
+        console.log(`✅ Above table confirms synchronized readings - this is true comparative data!`);
+      }
+    } else if (data.length > 1) {
+      console.log('⚠️ === NON-COMPARATIVE DATA WARNING ===');
+      console.log(`❌ Sensors have different point counts: ${data.map(s => s.data.length).join(', ')}`);
+      console.log(`🔄 This suggests individual sensor optimization instead of comparative sampling`);
+    }
+    
     data.forEach((sensor, index) => {
+      console.log(`📈 Sensor ${index + 1}: ${sensor.sensorId}`);
+      console.log(`   🏷️  MAC: ${sensor.mac}, Type: ${sensor.type}, Unit: ${sensor.unit}`);
+      console.log(`   📊 Data points: ${sensor.data.length}`);
+      console.log(`   📈 Values: min=${sensor.min}, max=${sensor.max}, avg=${sensor.avg}`);
+      console.log(`   🔧 Optimization: ${sensor.optimization.strategy} (${sensor.optimization.originalCount} -> ${sensor.optimization.optimizedCount})`);
+      
+      if (sensor.data.length > 0) {
+        console.log(`   ⏰ Time range: ${sensor.data[0].timestamp} -> ${sensor.data[sensor.data.length-1].timestamp}`);
+        console.log(`   📝 Sample values: [${sensor.data.slice(0, 3).map(d => d.value).join(', ')}${sensor.data.length > 3 ? '...' : ''}]`);
+      }
     });
+    console.log(`⏱️  Total processing time: ${processingTime}ms`);
+    console.log('🏁 === OPTIMIZED TELEMETRY QUERY END ===\n');
 
     return { data };
+  }
+
+  /**
+   * 🔍 Detect which optimization strategy was used based on data patterns
+   */
+  private detectOptimizationStrategy(
+    rows: any[], 
+    sensorCount: number, 
+    targetPoints: number
+  ): OptimizationInfo['strategy'] {
+    if (!rows.length) return 'database-optimized';
+    
+    // Check for intersection-based sampling (comparison mode with exact timestamps)
+    if (sensorCount > 1) {
+      // Check if data points have synchronized timestamps (intersection-based)
+      const timestamps = rows.map(r => new Date(r.ts).getTime());
+      const timeSet = new Set(timestamps);
+      
+      // If we have fewer unique timestamps than total points, it suggests intersection-based sampling
+      const uniqueTimestampRatio = timeSet.size / timestamps.length;
+      
+      if (uniqueTimestampRatio < 0.8) { // Less than 80% unique timestamps suggests intersection
+        console.log(`🎯 Detected intersection-based sampling (${timeSet.size} unique timestamps from ${timestamps.length} points)`);
+        return 'intersection-based-sampling';
+      }
+      
+      // Check for time alignment (time-bucket sampling)
+      if (timestamps.length > 1) {
+        const intervals: number[] = [];
+        
+        for (let i = 1; i < Math.min(5, timestamps.length); i++) {
+          intervals.push(timestamps[i] - timestamps[i-1]);
+        }
+        
+        // If intervals are consistent (within 10% variance), it's time-aligned
+        if (intervals.length > 1) {
+          const avgInterval = intervals.reduce((a, b) => a + b, 0) / intervals.length;
+          const variance = intervals.every(interval => 
+            Math.abs(interval - avgInterval) / avgInterval < 0.1
+          );
+          
+          if (variance) {
+            console.log(`🎯 Detected time-aligned sampling (consistent ${Math.floor(avgInterval/60000)}min intervals)`);
+            return 'time-aligned-sampling';
+          }
+        }
+      }
+    }
+    
+    // Default to database-optimized for other cases
+    return 'database-optimized';
   }
 
   /**
@@ -408,5 +538,295 @@ export class TelemetryController {
     });
 
     return { data };
+  }
+
+  /**
+   * 📥 BULK EXPORT - Estimate export size and get info
+   */
+  @Public()
+  @Post('export/estimate')
+  async estimateExport(@Body() query: any) {
+    const startTime = Date.now();
+    
+    // Use consistent defaults with stream endpoint
+    const format = query.format || 'csv';
+    const includeMetadata = query.includeMetadata !== false;
+    
+    console.log('🔍 === EXPORT ESTIMATION START ===');
+    console.log(`📊 Sensors: ${query.sensorIds?.length} [${query.sensorIds?.join(', ')}]`);
+    console.log(`📅 Time Range: ${query.timeRange?.start} -> ${query.timeRange?.end}`);
+    console.log(`🔧 Include Metadata: ${includeMetadata} (from query: ${query.includeMetadata})`);
+    console.log(`📊 Format: ${format}`);
+
+    const estimate = await this.svc.estimateExportSize({
+      sensorIds: query.sensorIds || [],
+      timeRange: {
+        start: new Date(query.timeRange?.start || ''),
+        end: new Date(query.timeRange?.end || '')
+      },
+      format,
+      includeMetadata
+    });
+
+    const processingTime = Date.now() - startTime;
+    
+    console.log(`📊 Export Estimation Results:`);
+    console.log(`   📈 Total Records: ${estimate.totalRecords.toLocaleString()}`);
+    console.log(`   ⏱️ Estimated Duration: ${estimate.estimatedDuration}`);
+    console.log(`   💾 Estimated Size: ${estimate.estimatedSizeKB.toLocaleString()} KB (${estimate.estimatedSizeBytes?.toLocaleString()} bytes)`);
+    console.log(`   📋 Format: ${estimate.sizeCalculation}`);
+    console.log(`   🔧 Recommended Batch: ${estimate.recommendedBatchSize.toLocaleString()}`);
+    console.log(`⏱️ Estimation Time: ${processingTime}ms`);
+
+    return {
+      success: true,
+      ...estimate,
+      recommendation: estimate.totalRecords > 100000 ? 'background' : 'stream'
+    };
+  }
+
+  /**
+   * 🔄 BULK EXPORT - Streaming CSV/JSON export for raw data
+   */
+  @Public()
+  @Post('export/stream')
+  async streamExport(
+    @Body() query: any,
+    @Res() res: Response
+  ) {
+    const startTime = Date.now();
+    
+    // Set defaults
+    const format = query.format || ExportFormat.CSV;
+    const maxRecords = query.maxRecords || 500000;
+    const includeMetadata = query.includeMetadata !== false;
+    
+    console.log('\n📥 === STREAMING EXPORT START ===');
+    console.log(`� Include Metadata: ${includeMetadata} (from query: ${query.includeMetadata})`);
+    console.log(`�📋 Sensors: ${query.sensorIds?.length} [${query.sensorIds?.join(', ')}]`);
+    console.log(`🔍 Debug query object:`, JSON.stringify(query, null, 2));
+
+    try {
+      // Validate required fields
+      if (!query.sensorIds || !query.timeRange) {
+        throw new Error('sensorIds and timeRange are required');
+      }
+
+      // Estimate first - use same parameters as will be used for export
+      const estimate = await this.svc.estimateExportSize({
+        sensorIds: query.sensorIds,
+        timeRange: {
+          start: new Date(query.timeRange.start),
+          end: new Date(query.timeRange.end)
+        },
+        format,
+        includeMetadata
+      });
+
+      // Adaptive batch size based on dataset size (after estimate is available)
+      const adaptiveBatchSize = estimate.totalRecords > 100000 ? 20000 : 10000;
+      const batchSize = query.batchSize || adaptiveBatchSize;
+      
+      console.log(`📊 Format: ${format}, Batch Size: ${batchSize.toLocaleString()}, Max: ${maxRecords.toLocaleString()}`);
+      console.log(`🎯 Adaptive Batch: ${estimate.totalRecords.toLocaleString()} records → ${batchSize.toLocaleString()} batch size`);
+
+      if (estimate.totalRecords > maxRecords) {
+        return res.status(400).json({
+          success: false,
+          error: `Dataset too large (${estimate.totalRecords} > ${maxRecords}). Use background export instead.`,
+          estimatedRecords: estimate.totalRecords,
+          recommendedMode: 'background'
+        });
+      }
+
+      // Setup streaming response headers
+      const filename = query.filename || 
+        `telemetry-export-${Date.now()}.${format}`;
+      
+      const contentType = format === ExportFormat.CSV ? 'text/csv' : 'application/json';
+      
+      res.setHeader('Content-Type', contentType);
+      res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+      res.setHeader('Cache-Control', 'no-cache');
+
+      // 📏 CONDITIONAL CONTENT-LENGTH: Only for small datasets to avoid calculation overhead
+      if (estimate.totalRecords <= 1000) {
+        try {
+          console.log('📏 Calculating exact content size for small dataset...');
+          
+          const contentLength = await this.svc.calculateExportSize({
+            sensorIds: query.sensorIds,
+            timeRange: {
+              start: new Date(query.timeRange.start),
+              end: new Date(query.timeRange.end)
+            },
+            format,
+            includeMetadata,
+            estimatedRecords: estimate.totalRecords
+          });
+
+          console.log(`📏 Small dataset - setting Content-Length: ${contentLength.toLocaleString()} bytes`);
+          res.setHeader('Content-Length', contentLength.toString());
+          res.setHeader('Accept-Ranges', 'bytes');
+        } catch (error) {
+          console.log(`⚠️ Size calculation failed for small dataset: ${error.message}`);
+          // Fallback to chunked transfer if calculation fails
+        }
+      } else {
+        console.log(`📏 Large dataset (${estimate.totalRecords.toLocaleString()} records) - using chunked transfer encoding for optimal performance`);
+        // For large datasets, skip Content-Length to avoid calculation overhead
+        // Frontend will handle progress differently for large exports
+      }
+
+      let processedRecords = 0;
+      let lastId: string | undefined;
+      let chunkCount = 0;
+
+      console.log(`🚀 Starting streaming export: ${estimate.totalRecords.toLocaleString()} records`);
+
+      // CSV Header or JSON array start
+      if (format === ExportFormat.CSV) {
+        const csvHeader = includeMetadata 
+          ? 'sensorId,timestamp,value,metadata\n'
+          : 'sensorId,timestamp,value\n';
+        res.write(csvHeader);
+      } else if (format === ExportFormat.JSON) {
+        res.write('{"data":[');
+      }
+
+      // Get metadata if needed
+      let metadata: any = {};
+      if (includeMetadata) {
+        const metaArray = await this.svc.getExportMetadata(query.sensorIds);
+        metadata = metaArray.reduce((acc, meta) => {
+          acc[meta.sensorId] = meta;
+          return acc;
+        }, {});
+      }
+
+      // Stream data in chunks
+      while (true) {
+        const chunk = await this.svc.getExportChunk({
+          sensorIds: query.sensorIds,
+          timeRange: {
+            start: new Date(query.timeRange.start),
+            end: new Date(query.timeRange.end)
+          },
+          batchSize,
+          lastId
+        });
+
+        if (chunk.count === 0) break;
+
+        chunkCount++;
+        processedRecords += chunk.count;
+
+        // Reduced logging for large datasets to improve performance
+        if (estimate.totalRecords <= 50000 || chunkCount % 5 === 0) {
+          console.log(`📦 Chunk ${chunkCount}: ${chunk.count} records (${processedRecords.toLocaleString()}/${estimate.totalRecords.toLocaleString()})`);
+          console.log(`🔍 Chunk details: lastId=${lastId?.substring(0, 8)}..., hasMore=${chunk.hasMore}, chunkSize=${chunk.count}`);
+        }
+
+        // Format and write chunk
+        for (let i = 0; i < chunk.data.length; i++) {
+          const row = chunk.data[i];
+          
+          if (format === ExportFormat.CSV) {
+            const metaStr = includeMetadata && metadata[row.sensorId] 
+              ? JSON.stringify(metadata[row.sensorId]).replace(/"/g, '""')
+              : '';
+            const csvRow = includeMetadata
+              ? `"${row.sensorId}","${row.timestamp}",${row.value},"${metaStr}"\n`
+              : `"${row.sensorId}","${row.timestamp}",${row.value}\n`;
+            res.write(csvRow);
+          } else if (format === ExportFormat.JSON) {
+            const jsonRow = includeMetadata 
+              ? { ...row, metadata: metadata[row.sensorId] }
+              : row;
+            // Fix: Only add comma if this is not the first record overall
+            const isFirstRecord = processedRecords - chunk.count + i === 0;
+            const prefix = isFirstRecord ? '' : ',';
+            res.write(prefix + JSON.stringify(jsonRow));
+          } else if (format === ExportFormat.JSONL) {
+            const jsonRow = includeMetadata 
+              ? { ...row, metadata: metadata[row.sensorId] }
+              : row;
+            res.write(JSON.stringify(jsonRow) + '\n');
+          }
+        }
+
+        lastId = chunk.lastId || undefined;
+        console.log(`🔄 Updated lastId: ${lastId?.substring(0, 8)}..., hasMore: ${chunk.hasMore}`);
+        
+        if (!chunk.hasMore) {
+          console.log(`🏁 Breaking loop - no more data (chunk.hasMore = false)`);
+          break;
+        }
+
+        // Prevent memory buildup
+        if (chunkCount % 10 === 0) {
+          await new Promise(resolve => setTimeout(resolve, 10));
+        }
+      }
+
+      // Close JSON array
+      if (format === ExportFormat.JSON) {
+        res.write(']}');
+      }
+
+      const totalTime = Date.now() - startTime;
+      const actualRecordsPerSec = Math.round(processedRecords / (totalTime / 1000));
+      
+      console.log(`✅ Streaming export completed:`);
+      console.log(`   📊 Records exported: ${processedRecords.toLocaleString()}`);
+      console.log(`   📦 Chunks processed: ${chunkCount}`);
+      console.log(`   ⏱️ Total time: ${totalTime}ms (${Math.round(totalTime / 1000)}s)`);
+      console.log(`   🚀 Actual speed: ${actualRecordsPerSec} records/sec`);
+      console.log(`   📈 Estimated vs Actual: ${estimate.estimatedDuration} vs ${Math.round(totalTime / 1000)}s`);
+      
+      // Performance feedback for future estimates
+      if (actualRecordsPerSec < 1500) {
+        console.log(`   ⚠️ Performance below expected - consider optimizing queries`);
+      } else if (actualRecordsPerSec > 4000) {
+        console.log(`   🎯 Excellent performance - estimation can be more aggressive`);
+      }
+
+      res.end();
+
+    } catch (error) {
+      console.error(`❌ Streaming export failed:`, error);
+      
+      if (!res.headersSent) {
+        res.status(500).json({
+          success: false,
+          error: 'Export failed: ' + error.message,
+          timestamp: new Date().toISOString()
+        });
+      } else {
+        // If headers already sent, we're mid-stream - just end it
+        res.end();
+      }
+    }
+  }
+
+  /**
+   * 📋 BULK EXPORT - Get export status (for background jobs)
+   */
+  @Public()
+  @Get('export/status/:jobId')
+  async getExportStatus(@Param('jobId') jobId: string) {
+    // This would integrate with a job queue system like Bull/BullMQ
+    // For now, return a mock response
+    return {
+      success: true,
+      progress: {
+        jobId,
+        status: 'processing',
+        progress: 75,
+        estimatedTimeRemaining: '2m',
+        processedRecords: 75000,
+        totalRecords: 100000
+      } as ExportProgress
+    };
   }
 }
