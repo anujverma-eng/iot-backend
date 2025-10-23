@@ -19,17 +19,20 @@ export class MailService {
 
   constructor(private readonly config: ConfigService) {
     const region = this.config.get('ses.region') || this.config.get('aws.region');
-    this.fromEmail = this.config.get('ses.fromEmail') || 'noreply@motionics.com';
+    this.fromEmail = this.config.get('ses.fromEmail') || 'info@motionics.com';
     this.configSet = this.config.get('ses.configSet');
     
-    // TODO: SES client initialization temporarily disabled for testing
-    // Uncomment when SES is properly configured
-    // this.sesClient = new SESv2Client({
-    //   region,
-    //   // AWS SDK will automatically pick up credentials from environment
-    // });
+    this.sesClient = new SESv2Client({
+      region,
+      // AWS SDK will automatically pick up credentials from environment
+    });
     
-    this.logger.log('MailService initialized (SES disabled for testing)');
+    // Don't use config set if it's not explicitly set or is 'default'
+    if (!this.configSet || this.configSet === 'default') {
+      this.configSet = undefined;
+    }
+    
+    this.logger.log(`MailService initialized with SES enabled - Region: ${region}, From: ${this.fromEmail}, ConfigSet: ${this.configSet || 'none'}`);
   }
 
   /**
@@ -40,15 +43,6 @@ export class MailService {
     templateName: string,
     templateData: InviteEmailData
   ): Promise<string> {
-    // TODO: Email sending temporarily disabled for testing
-    // Uncomment when SES is properly configured
-    this.logger.log(`[MOCK] Would send invite email to ${to} with template ${templateName}`);
-    this.logger.log(`[MOCK] Template data:`, templateData);
-    
-    // Return mock message ID for testing
-    return `mock-message-id-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
-    
-    /* Uncomment when SES is configured:
     try {
       const command = new SendEmailCommand({
         FromEmailAddress: this.fromEmail,
@@ -61,18 +55,27 @@ export class MailService {
             TemplateData: JSON.stringify(templateData),
           },
         },
-        ConfigurationSetName: this.configSet,
+        // Only include ConfigurationSetName if it's defined
+        // ...(this.configSet && { ConfigurationSetName: this.configSet }),
       });
 
+      this.logger.log(`Attempting to send template email from ${this.fromEmail} to ${to}`);
       const response = await this.sesClient.send(command);
       this.logger.log(`Email sent successfully to ${to}, MessageId: ${response.MessageId}`);
       
       return response.MessageId || '';
     } catch (error) {
-      this.logger.error(`Failed to send email to ${to}:`, error);
+      this.logger.error(`Failed to send email to ${to}:`, {
+        error: error.message,
+        code: error.name,
+        metadata: error.$metadata,
+        templateName,
+        fromEmail: this.fromEmail,
+        region: this.config.get('ses.region') || this.config.get('aws.region'),
+        configSet: this.configSet
+      });
       throw error;
     }
-    */
   }
 
   /**
@@ -84,15 +87,6 @@ export class MailService {
     htmlBody: string,
     textBody?: string
   ): Promise<string> {
-    // TODO: Email sending temporarily disabled for testing
-    // Uncomment when SES is properly configured
-    this.logger.log(`[MOCK] Would send simple email to ${to} with subject: ${subject}`);
-    this.logger.log(`[MOCK] HTML body length: ${htmlBody.length} chars`);
-    
-    // Return mock message ID for testing
-    return `mock-simple-email-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
-    
-    /* Uncomment when SES is configured:
     try {
       const command = new SendEmailCommand({
         FromEmailAddress: this.fromEmail,
@@ -119,18 +113,26 @@ export class MailService {
             },
           },
         },
-        ConfigurationSetName: this.configSet,
+        // Only include ConfigurationSetName if it's defined
+        ...(this.configSet && { ConfigurationSetName: this.configSet }),
       });
 
+      this.logger.log(`Attempting to send email from ${this.fromEmail} to ${to}`);
       const response = await this.sesClient.send(command);
       this.logger.log(`Simple email sent successfully to ${to}, MessageId: ${response.MessageId}`);
       
       return response.MessageId || '';
     } catch (error) {
-      this.logger.error(`Failed to send simple email to ${to}:`, error);
+      this.logger.error(`Failed to send simple email to ${to}:`, {
+        error: error.message,
+        code: error.name,
+        metadata: error.$metadata,
+        fromEmail: this.fromEmail,
+        region: this.config.get('ses.region') || this.config.get('aws.region'),
+        configSet: this.configSet
+      });
       throw error;
     }
-    */
   }
 
   /**

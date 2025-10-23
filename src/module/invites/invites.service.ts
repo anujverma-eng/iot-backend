@@ -209,34 +209,47 @@ export class InvitesService {
 
       await session.commitTransaction();
 
-      // TODO: Send email (outside transaction) - Currently commented out for testing
-      // Uncomment when SES is configured
+      // Send email (outside transaction)
       try {
         const inviteUrl = this.buildInviteUrl(token);
         
-        // TODO: Email sending temporarily disabled for testing
-        // const messageId = await this.mailService.sendInviteEmail(
-        //   dto.email,
-        //   'organization-invite',
-        //   {
-        //     orgName: org.name,
-        //     role: dto.role || UserRole.MEMBER,
-        //     inviteUrl,
-        //     expiresAt: expiresAt.toISOString(),
-        //   }
-        // );
+        // Get inviter details for the email
+        const inviterUser = await this.userModel.findById(invitedBy).lean();
+        const inviterName = inviterUser?.fullName || inviterUser?.email || 'Someone';
 
-        // Update invite with email info (mock data for testing)
+        // Prepare email data
+        const emailData = {
+          orgName: org.name,
+          role: dto.role || UserRole.MEMBER,
+          inviteUrl,
+          expiresAt: expiresAt.toLocaleDateString(),
+          inviterName,
+        };
+
+        // Use simple email with generated HTML (fallback method that works)
+        const htmlBody = this.mailService.generateInviteEmailHtml(emailData);
+        const subject = `You're invited to join ${org.name}`;
+
+        const messageId = await this.mailService.sendSimpleEmail(
+          dto.email,
+          subject,
+          htmlBody
+        );
+
+        // Update invite with email info
         invite.status = InviteStatus.SENT;
-        // invite.lastEmailMessageId = messageId;
-        invite.lastEmailMessageId = `mock-message-id-${Date.now()}`;
+        invite.lastEmailMessageId = messageId;
         invite.deliveryAt = new Date();
         await invite.save();
 
-        this.logger.log(`Invite created for ${dto.email} for org ${org.name} (email sending disabled)`);
-        this.logger.log(`Invite URL for testing: ${inviteUrl}`);
+        this.logger.log(`Invite created and email sent for ${dto.email} for org ${org.name}`);
+        this.logger.log(`Email MessageId: ${messageId}`);
+        this.logger.log(`Invite URL: ${inviteUrl}`);
       } catch (emailError) {
-        this.logger.error(`Failed to process invite for ${dto.email}:`, emailError);
+        this.logger.error(`Failed to send email for invite ${dto.email}:`, emailError);
+        // Update invite status to indicate email failed
+        invite.status = InviteStatus.CREATED; // Keep as created since email failed
+        await invite.save();
         // Don't fail the whole operation if email fails
       }
 
