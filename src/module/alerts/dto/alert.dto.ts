@@ -91,7 +91,7 @@ export class CreateAlertRuleDto {
   @IsOptional()
   @IsNumber()
   @Min(5)
-  @Max(60000)
+  @Max(600000)
   throttleMinutes?: number;
 
   @IsOptional()
@@ -127,7 +127,7 @@ export class UpdateAlertRuleDto {
   @IsOptional()
   @IsNumber()
   @Min(5)
-  @Max(60)
+  @Max(600000)
   throttleMinutes?: number;
 
   @IsOptional()
