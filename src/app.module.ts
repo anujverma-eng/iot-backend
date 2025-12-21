@@ -23,6 +23,7 @@ import { TelemetryModule } from './module/telemetry/telemetry.module';
 import { IotModule } from './module/iot/iot.module';
 import { RealtimeModule } from './module/realtime/realtime.module';
 import { SettingsModule } from './module/settings/settings.module';
+import { AlertsModule } from './module/alerts/alerts.module';
 
 @Module({
   imports: [
@@ -45,6 +46,7 @@ import { SettingsModule } from './module/settings/settings.module';
     IotModule,
     RealtimeModule,
     SettingsModule,
+    AlertsModule,
   ],
   controllers: [AppController],
   providers: [
