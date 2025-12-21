@@ -77,7 +77,7 @@ export class GatewaysService {
       .lean();
     if (!org) throw new BadRequestException('Organization not found');
 
-    const count = await this.gwModel.countDocuments({ orgId });
+    const count = await this.gwModel.countDocuments({ orgId: new Types.ObjectId(orgId) });
     if (count >= org.planId.maxGateways)
       throw new ForbiddenException('Gateway limit exceeded – upgrade plan');
 
@@ -93,7 +93,7 @@ export class GatewaysService {
     const saved = await this.gwModel.create({
       _id: gatewayId,
       mac: dto.mac,
-      orgId,
+      orgId: new Types.ObjectId(orgId),
       certId: bundle.certId,
       certPem: bundle.certPem,
       keyPem: bundle.keyPem,
@@ -412,9 +412,9 @@ export class GatewaysService {
       }
 
       // 3. Delete the gateway from database first
-      await this.gwModel.deleteOne({ _id: gwId, orgId });
+      await this.gwModel.deleteOne({ _id: gwId, orgId: new Types.ObjectId(orgId) });
       // await this.gwModel.updateOne(
-      //   { _id: gwId, orgId },
+      //   { _id: gwId, orgId: new Types.ObjectId(orgId) },
       //   { $set: { orgId: new Types.ObjectId('68282f0d90804acdfb54738d') } },
       // );
 
@@ -443,7 +443,7 @@ export class GatewaysService {
       console.error(`Error during gateway cleanup for ${gwId}:`, error);
 
       // Still delete the gateway record
-      await this.gwModel.deleteOne({ _id: gwId, orgId });
+      await this.gwModel.deleteOne({ _id: gwId, orgId: new Types.ObjectId(orgId) });
 
       return {
         message:
