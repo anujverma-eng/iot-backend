@@ -42,15 +42,25 @@ export class AlertsService {
 
     // Validate device and fetch displayName based on alert type
     if (dto.alertType === AlertType.DEVICE_ONLINE || dto.alertType === AlertType.DEVICE_OFFLINE) {
-      // Gateway-based alert
+      // Can be gateway or sensor
+      // Try gateway first
       const gw = await this.gatewayModel.findOne({ _id: dto.deviceId }).lean();
-      if (!gw) {
-        throw new NotFoundException('Gateway not found');
+      if (gw) {
+        if (!gw.orgId || gw.orgId.toString() !== orgId) {
+          throw new ForbiddenException('Gateway does not belong to your organization');
+        }
+        displayName = gw.label || gw._id;
+      } else {
+        // Try sensor
+        const sensor = await this.sensorModel.findOne({ _id: dto.deviceId }).lean();
+        if (!sensor) {
+          throw new NotFoundException('Device (gateway or sensor) not found');
+        }
+        if (sensor.orgId && sensor.orgId.toString() !== orgId) {
+          throw new ForbiddenException('Sensor does not belong to your organization');
+        }
+        displayName = sensor.displayName || sensor._id;
       }
-      if (!gw.orgId || gw.orgId.toString() !== orgId) {
-        throw new ForbiddenException('Gateway does not belong to your organization');
-      }
-      displayName = gw.label || gw._id;
     } else {
       // Sensor-based alert
       const sensor = await this.sensorModel.findOne({ _id: dto.deviceId }).lean();
@@ -93,7 +103,7 @@ export class AlertsService {
     if (
       dto.condition &&
       dto.condition.operator === 'between' &&
-      !dto.condition.value2
+      (dto.condition.value2 === undefined || dto.condition.value2 === null)
     ) {
       throw new BadRequestException(
         'value2 is required for "between" operator',
@@ -319,15 +329,25 @@ export class AlertsService {
       const alertType = dto.alertType || existingRule.alertType;
 
       if (alertType === AlertType.DEVICE_ONLINE || alertType === AlertType.DEVICE_OFFLINE) {
-        // Gateway-based alert
+        // Can be gateway or sensor
+        // Try gateway first
         const gw = await this.gatewayModel.findOne({ _id: dto.deviceId }).lean();
-        if (!gw) {
-          throw new NotFoundException('Gateway not found');
+        if (gw) {
+          if (!gw.orgId || gw.orgId.toString() !== orgId) {
+            throw new ForbiddenException('Gateway does not belong to your organization');
+          }
+          displayName = gw.label || gw._id;
+        } else {
+          // Try sensor
+          const sensor = await this.sensorModel.findOne({ _id: dto.deviceId }).lean();
+          if (!sensor) {
+            throw new NotFoundException('Device (gateway or sensor) not found');
+          }
+          if (sensor.orgId && sensor.orgId.toString() !== orgId) {
+            throw new ForbiddenException('Sensor does not belong to your organization');
+          }
+          displayName = sensor.displayName || sensor._id;
         }
-        if (!gw.orgId || gw.orgId.toString() !== orgId) {
-          throw new ForbiddenException('Gateway does not belong to your organization');
-        }
-        displayName = gw.label || gw._id;
       } else {
         // Sensor-based alert
         const sensor = await this.sensorModel.findOne({ _id: dto.deviceId }).lean();
