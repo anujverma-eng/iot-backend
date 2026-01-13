@@ -39,6 +39,9 @@ export class User {
     default: UserStatus.ACTIVE,
   })
   status: UserStatus;
+
+  @Prop({ required: false })
+  companyName?: string;
 }
 
 export const UserSchema = SchemaFactory.createForClass(User);

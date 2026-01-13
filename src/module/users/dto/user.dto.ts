@@ -21,7 +21,7 @@ export class CreateUserDto {
   @IsString()
   displayName?: string;
 
-  @IsOptional()         // was @IsString() (required)
+  @IsOptional() // was @IsString() (required)
   @IsString()
   cognitoSub?: string;
 
@@ -33,7 +33,6 @@ export class CreateUserDto {
 }
 
 export class UpdateUserDto extends CreateUserDto {}
-
 
 export class InviteUserDto {
   @IsEmail()
@@ -58,7 +57,7 @@ export class UpdateUserInfoDto {
 
   @IsOptional()
   @IsString()
-  @Length(1, 100)
+  @Length(1, 500)
   fullName?: string;
 
   @IsOptional()
@@ -69,6 +68,11 @@ export class UpdateUserInfoDto {
   @IsString()
   @Length(1, 10)
   countryCode?: string;
+
+  @IsOptional()
+  @IsString()
+  @Length(1, 500)
+  companyName?: string;
 }
 
 export class MeDto {

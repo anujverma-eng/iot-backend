@@ -177,6 +177,7 @@ export class UsersController {
           email: user.email,
           displayName: (user as any).displayName,
           fullName: user.fullName,
+          companyName: user?.companyName,
           phoneNumber: user.phoneNumber,
           countryCode: user.countryCode,
           cognitoSub: user.cognitoSub,
