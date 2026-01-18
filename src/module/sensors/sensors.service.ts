@@ -166,9 +166,10 @@ export class SensorsService {
       sort?: string;
       dir?: 'asc' | 'desc';
       type?: SensorType;
+      favorite?: string;
     },
   ) {
-    const { page, limit, claimed, search, sort, dir, type } = opts;
+    const { page, limit, claimed, search, sort, dir, type, favorite } = opts;
 
     // if orgId is not of type ObjectId, convert it
     if (!(orgId instanceof Types.ObjectId)) {
@@ -184,6 +185,7 @@ export class SensorsService {
       // lastSeenBy: { $in: gatewayIds },
       $or: [{ orgId }, { orgId: null }],
       ...(type && { type }),
+      ...(favorite && { favorite }),
     };
 
     // 3. filter by claimed if provided

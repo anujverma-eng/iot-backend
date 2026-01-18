@@ -76,6 +76,7 @@ export class SensorsController {
       sort?: string; // field
       dir?: 'asc' | 'desc';
       type?: SensorType,
+      favorite?: string,
     },
     @Req() req: any,
   ) {
@@ -90,6 +91,7 @@ export class SensorsController {
       sort: q.sort,
       dir: q.dir,
       type: q?.type,
+      favorite: q?.favorite,
     });
 
     return {

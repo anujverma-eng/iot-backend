@@ -93,7 +93,7 @@ export class InvitesService {
     private readonly membershipsService: MembershipsService,
     private readonly mailService: MailService,
     private readonly config: ConfigService,
-  ) {}
+  ) { }
 
   /**
    * Create and send invite
@@ -104,7 +104,7 @@ export class InvitesService {
     dto: CreateInviteDto
   ): Promise<Invite> {
     const session = await this.inviteModel.db.startSession();
-    
+
     try {
       session.startTransaction();
 
@@ -117,23 +117,46 @@ export class InvitesService {
       // Check if user is already a member
       // First, normalize email to lowercase
       const normalizedEmail = dto.email.trim().toLowerCase();
-      
+
       // Find user by email first
       const existingUser = await this.userModel.findOne({ email: normalizedEmail }).lean();
       if (existingUser) {
-        // Check if this user is already a member of this org
-        const existingMembership = await this.membershipModel.findOne({
+        // Check if this user is already an ACTIVE member of this org
+        const activeMembership = await this.membershipModel.findOne({
           orgId: new Types.ObjectId(orgId),
           userId: existingUser._id,
-          status: { $ne: MembershipStatus.SUSPENDED }
+          status: MembershipStatus.ACTIVE
         }).lean();
 
-        if (existingMembership) {
+        if (activeMembership) {
           throw new ConflictException({
             status: 409,
             code: 'MEMBERSHIP_EXISTS',
             message: 'User is already a member of this organization',
           });
+        }
+
+        // Backward compatibility: Check for stale INVITED membership with expired invite
+        // This handles existing stale data from before the cleanup logic was added
+        const invitedMembership = await this.membershipModel.findOne({
+          orgId: new Types.ObjectId(orgId),
+          userId: existingUser._id,
+          status: MembershipStatus.INVITED
+        }).lean();
+
+        if (invitedMembership) {
+          // Check if the associated invite has expired
+          const associatedInvite = await this.inviteModel.findOne({
+            email: normalizedEmail,
+            orgId: new Types.ObjectId(orgId),
+          }).sort({ createdAt: -1 }).lean(); // Get most recent invite
+
+          if (associatedInvite && (associatedInvite.status === InviteStatus.EXPIRED ||
+            new Date() > associatedInvite.expiresAt)) {
+            // Clean up stale membership
+            await this.membershipModel.deleteOne({ _id: invitedMembership._id });
+            this.logger.log(`Cleaned up stale INVITED membership for ${normalizedEmail} in org ${orgId} (associated invite expired)`);
+          }
         }
       }
 
@@ -212,7 +235,7 @@ export class InvitesService {
       // Send email (outside transaction)
       try {
         const inviteUrl = this.buildInviteUrl(token);
-        
+
         // Get inviter details for the email
         const inviterUser = await this.userModel.findById(invitedBy).lean();
         const inviterName = inviterUser?.fullName || inviterUser?.email || 'Someone';
@@ -289,7 +312,7 @@ export class InvitesService {
     for (const userDto of dto.users) {
       try {
         const invite = await this.createInvite(orgId, invitedBy, userDto);
-        
+
         result.successful.push({
           email: userDto.email,
           invite: {
@@ -405,6 +428,19 @@ export class InvitesService {
           { _id: invite._id },
           { status: InviteStatus.EXPIRED }
         );
+
+        // Clean up stale membership (INVITED status only)
+        const user = await this.userModel.findOne({ email: invite.email }).lean();
+        if (user) {
+          const deleted = await this.membershipModel.deleteOne({
+            userId: user._id,
+            orgId: invite.orgId,
+            status: MembershipStatus.INVITED,
+          });
+          if (deleted.deletedCount > 0) {
+            this.logger.log(`Cleaned up expired invitation membership for ${invite.email} in org ${invite.orgId}`);
+          }
+        }
       }
 
       return {
@@ -462,6 +498,14 @@ export class InvitesService {
       if (new Date() > invite.expiresAt) {
         invite.status = InviteStatus.EXPIRED;
         await invite.save({ session });
+
+        // Clean up stale membership
+        await this.membershipModel.deleteOne({
+          userId: new Types.ObjectId(userId),
+          orgId: invite.orgId,
+          status: MembershipStatus.INVITED,
+        });
+
         throw new BadRequestException({
           status: 410,
           code: 'INVITE_EXPIRED',
@@ -589,7 +633,7 @@ export class InvitesService {
 
       // Find the user by email to get their userId
       const user = await this.userModel.findOne({ email: invite.email });
-      
+
       // Revoke the invitation
       invite.status = InviteStatus.REVOKED;
       invite.expiresAt = new Date(); // Expire the token immediately
