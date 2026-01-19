@@ -348,7 +348,8 @@ export class SensorsService {
   /** mini stats */
   async getStats(orgId: Types.ObjectId) {
     const today = new Date();
-    today.setHours(0, 0, 0, 0);
+    // today minus 2 minutes
+    today.setMinutes(today.getMinutes() - 1);
     const [claimed, unclaimed, liveSensors, offlineSensors] = await Promise.all(
       [
         this.sensorModel.countDocuments({ orgId, claimed: true }),
