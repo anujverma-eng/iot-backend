@@ -156,6 +156,47 @@ export class SensorsService {
     return { rows, total };
   }
 
+  async getUnclaimedSensorsSeenByMyGateways(
+    callerOrg: Types.ObjectId,
+    { page, limit, search }: { page: number; limit: number; search?: string },
+  ) {
+    // Get All My Gateways
+    const myGateways = await this.gwModel
+      .find({ orgId: callerOrg }, { _id: 1 })
+      .lean();
+    const myGatewayIds = myGateways.map((gw) => gw._id);
+
+    const base = {
+      lastSeenBy: { $in: myGatewayIds },
+      ignored: { $ne: true },
+      claimed: false,
+      $or: [
+        { orgId: callerOrg }, // claimed by my org
+        { orgId: null }, // unclaimed but seen by my gw
+      ],
+    };
+
+    // 4. text‐index search if “search” is non‐empty
+    if (search?.trim()) {
+      // Use $text so Mongo uses the text index on { mac, displayName }
+      base['$text'] = { $search: search.trim() };
+    }
+
+    const total = await this.sensorModel.countDocuments(base);
+    const rows = await this.sensorModel
+      .find(base)
+      .sort({ lastSeen: -1 })
+      .skip((page - 1) * limit)
+      .limit(limit)
+      .lean();
+
+    // Check and update sensor online status based on settings
+    await this.calculateAndUpdateSensorOnlineStatus(rows, callerOrg);
+
+    return { rows, total };
+  }
+  
+
   async getAllSensors(
     orgId: Types.ObjectId,
     opts: {
@@ -342,6 +383,9 @@ export class SensorsService {
       { $set: { orgId: null, claimed: false } },
     );
     if (!upd) throw new NotFoundException('Sensor not found or not yours');
+
+    // delete associated telemetry data as well, with ts: less than now
+    this.telemetryModel.deleteMany({ sensorId: mac, ts: { $lte: new Date() } });
     return upd.toObject();
   }
 

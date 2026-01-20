@@ -34,6 +34,35 @@ export class SensorsController {
   /** GET /sensors/by-gateway/:gatewayId */
   @UseGuards(PermissionGuard)
   @RequiredPermissions(PERMISSIONS.SENSORS.VIEW)
+  @Get('unclaimed')
+  async getUnclaimedSensorsSeenByMyGateways(
+    @Query() q: { page?: string; limit?: string, search?: string },
+    @Req() req: { user: OrgContextUser },
+  ) {
+    const page = normPage(q);
+    const limit = normLimit(q, 50);
+
+    const { rows, total } = await this.svc.getUnclaimedSensorsSeenByMyGateways(
+      new ObjectId(req.user.orgId!),
+      { page, limit, search: q.search },
+    );
+
+    return {
+      data: plainToInstance(SensorResponseDto, rows, {
+        excludeExtraneousValues: true,
+      }),
+      pagination: {
+        total,
+        page,
+        limit,
+        totalPages: Math.ceil(total / limit),
+      },
+    };
+
+  }
+  /** GET /sensors/by-gateway/:gatewayId */
+  @UseGuards(PermissionGuard)
+  @RequiredPermissions(PERMISSIONS.SENSORS.VIEW)
   @Get('by-gateway/:gatewayId')
   async listByGateway(
     @Param('gatewayId') gatewayId: string,
