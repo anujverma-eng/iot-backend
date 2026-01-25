@@ -22,7 +22,7 @@ export class SensorsService {
     @InjectModel(Telemetry.name)
     private readonly telemetryModel: Model<Telemetry>,
     private readonly settingsService: SettingsService,
-  ) {}
+  ) { }
 
   /**
    * Check and update sensor online status based on organization settings
@@ -31,7 +31,7 @@ export class SensorsService {
     try {
       // Get the organization's settings
       const settings = await this.settingsService.findByOrgId(orgId.toString());
-      
+
       if (!settings || !settings.sensorOfflineTimeOut) {
         // If no settings found or no timeout configured, skip the check
         return;
@@ -49,17 +49,17 @@ export class SensorsService {
 
         const lastUpdated = new Date(sensor.lastSeen);
         const timeDifference = currentTime.getTime() - lastUpdated.getTime();
-        
+
         // If time difference is greater than timeout, sensor should be offline
         const shouldBeOnline = timeDifference <= timeoutMs;
-        
+
         // Update the sensor object immediately for the response
         if (sensor.isOnline !== shouldBeOnline) {
           sensorsToUpdate.push({
             mac: sensor.mac,
             isOnline: shouldBeOnline
           });
-          
+
           // Update the sensor in memory immediately
           sensor.isOnline = shouldBeOnline;
         }
@@ -104,7 +104,7 @@ export class SensorsService {
 
       const initialLength = sensors.length;
       await this.calculateAndUpdateSensorOnlineStatus(sensors, orgId);
-      
+
       return { updated: initialLength };
     } catch (error) {
       console.error('Error updating sensor online status for org:', error);
@@ -195,7 +195,7 @@ export class SensorsService {
 
     return { rows, total };
   }
-  
+
 
   async getAllSensors(
     orgId: Types.ObjectId,
@@ -339,10 +339,10 @@ export class SensorsService {
       })
       .lean();
     if (!s) throw new NotFoundException('Sensor not visible to your org');
-    
+
     // Check and update sensor online status based on settings
     await this.calculateAndUpdateSensorOnlineStatus([s], orgId);
-    
+
     return s;
   }
 
@@ -352,12 +352,16 @@ export class SensorsService {
     orgId: Types.ObjectId,
     dto: { displayName?: string, isOnline?: boolean },
   ) {
+    console.log('API Marking Sensor to Offline', dto);
+    // removing the support of isOnline from here, as Frontend will now not detect that if the sensor is offline or not, 
+    // instead we're using Cron job to detect the offline sensors.
     const s = await this.sensorModel.findOneAndUpdate(
       { _id: mac, orgId },
-      { $set: { 
-        displayName: dto.displayName, 
-        ...(dto.isOnline !== undefined && { isOnline: dto.isOnline }),
-      } },
+      {
+        $set: {
+          displayName: dto.displayName,
+        }
+      },
       { new: true },
     );
     if (!s) throw new NotFoundException('Sensor not found in your org');
@@ -385,7 +389,7 @@ export class SensorsService {
     if (!upd) throw new NotFoundException('Sensor not found or not yours');
 
     // delete associated telemetry data as well, with ts: less than now
-    this.telemetryModel.deleteMany({ sensorId: mac, ts: { $lte: new Date() } });
+    await this.telemetryModel.deleteMany({ sensorId: mac, ts: { $lte: new Date() } });
     return upd.toObject();
   }
 

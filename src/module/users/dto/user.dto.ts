@@ -73,6 +73,11 @@ export class UpdateUserInfoDto {
   @IsString()
   @Length(1, 500)
   companyName?: string;
+
+  @IsOptional()
+  @IsString()
+  @Length(1, 50)
+  timezone?: string; // IANA timezone string (e.g., 'Asia/Kolkata')
 }
 
 export class MeDto {
@@ -84,6 +89,8 @@ export class MeDto {
   @Expose() phoneNumber?: string;
   @Expose() countryCode?: string;
   @Expose() displayName?: string;
+  @Expose() companyName?: string;
+  @Expose() timezone?: string;
 
   @Transform(() => undefined, { toPlainOnly: true })
   __v?: never;

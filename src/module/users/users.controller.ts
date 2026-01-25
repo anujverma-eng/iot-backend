@@ -34,7 +34,7 @@ export class UsersController {
     private readonly usersService: UsersService,
     private readonly membershipsService: MembershipsService,
     private readonly invitesService: InvitesService,
-  ) {}
+  ) { }
 
   /**
    * Get all available permissions for UI rendering
@@ -49,10 +49,10 @@ export class UsersController {
       data: {
         // Full structured permissions object
         permissions: PERMISSIONS,
-        
+
         // Flat array of all permission strings
         allPermissions: ALL_PERMISSIONS,
-        
+
         // Organized by category for easy UI rendering
         categories: [
           {
@@ -181,6 +181,7 @@ export class UsersController {
           phoneNumber: user.phoneNumber,
           countryCode: user.countryCode,
           cognitoSub: user.cognitoSub,
+          timezone: user?.timezone,
         },
         memberships: memberships.map(m => {
           const effectivePermissions = computeEffectivePermissions(
@@ -188,7 +189,7 @@ export class UsersController {
             m.allow || [],
             m.deny || []
           );
-          
+
           return {
             orgId: m.orgId._id,
             orgName: (m.orgId as any).name,
@@ -256,9 +257,13 @@ export class UsersController {
       return {
         message: 'Profile updated successfully',
         user: {
-          id: updatedUser._id,
-          email: updatedUser.email,
+          id: updatedUser?._id,
+          email: updatedUser?.email,
           displayName: (updatedUser as any).displayName,
+          fullName: updatedUser?.fullName,
+          phoneNumber: updatedUser?.phoneNumber,
+          countryCode: updatedUser?.countryCode,
+          timezone: updatedUser?.timezone,
         },
       };
     } catch (error) {
@@ -282,11 +287,12 @@ export class UsersController {
         message: 'User information updated successfully',
         data: {
           user: {
-            id: updatedUser._id,
-            email: updatedUser.email,
-            fullName: updatedUser.fullName,
-            phoneNumber: updatedUser.phoneNumber,
-            countryCode: updatedUser.countryCode,
+            id: updatedUser?._id,
+            email: updatedUser?.email,
+            fullName: updatedUser?.fullName,
+            phoneNumber: updatedUser?.phoneNumber,
+            countryCode: updatedUser?.countryCode,
+            timezone: updatedUser?.timezone,
           },
         },
       };
@@ -319,7 +325,7 @@ export class UsersController {
   @RequiredPermissions(PERMISSIONS.INVITES.CREATE)
   @HttpCode(HttpStatus.CREATED)
   async invite(
-    @Body() dto: InviteUserDto, 
+    @Body() dto: InviteUserDto,
     @Req() req: { user: OrgContextUser }
   ) {
     // Redirect to new invites service

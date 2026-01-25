@@ -1,3 +1,4 @@
+
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
 import { Document, Types } from 'mongoose';
 import { UserRole, UserStatus } from './enums/users.enum';
@@ -42,6 +43,9 @@ export class User {
 
   @Prop({ required: false })
   companyName?: string;
+
+  @Prop({ required: false })
+  timezone?: string; // IANA timezone string (e.g., 'Asia/Kolkata', 'America/New_York')
 }
 
 export const UserSchema = SchemaFactory.createForClass(User);

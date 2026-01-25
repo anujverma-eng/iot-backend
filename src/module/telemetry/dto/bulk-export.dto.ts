@@ -60,6 +60,10 @@ export class BulkExportQueryDto {
   @IsString()
   @IsOptional()
   filename?: string;
+
+  @IsString()
+  @IsOptional()
+  timezone?: string; // IANA timezone string (e.g., 'Asia/Kolkata', 'America/New_York')
 }
 
 export interface ExportProgress {

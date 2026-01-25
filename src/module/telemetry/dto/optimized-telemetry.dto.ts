@@ -31,7 +31,7 @@ class LiveModeDto {
   @Transform(({ value }) => Number(value))
   @IsInt()
   @IsPositive()
-  @Max(100)
+  @Max(10000)
   maxReadings?: number;
 }
 
@@ -63,8 +63,8 @@ export class OptimizedTelemetryQueryDto {
   @Transform(({ value }) => Number(value))
   @IsInt()
   @IsPositive()
-  @Min(50)
-  @Max(2000)
+  @Min(0)
+  @Max(200000)
   targetPoints!: number;
 
   @IsOptional()

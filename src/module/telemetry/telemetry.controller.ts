@@ -12,14 +12,15 @@ import {
   Header,
 } from '@nestjs/common';
 import { Response } from 'express';
+import { DateTime } from 'luxon';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { Roles } from '../auth/roles.decorator';
 import { RolesGuard } from '../auth/roles.guard';
 import { SensorsService } from '../sensors/sensors.service';
 import { UserRole } from '../users/enums/users.enum';
 import { TelemetryQuery, TelemetryQueryBody } from './dto/telemetry.dto';
-import { 
-  OptimizedTelemetryQueryDto, 
+import {
+  OptimizedTelemetryQueryDto,
   TableDataQueryDto,
   OptimizedSensorData,
   TableSensorData,
@@ -50,7 +51,7 @@ export class TelemetryController {
     private readonly svc: TelemetryService,
     private readonly sns: SensorsService,
     private readonly optimizer: TelemetryOptimizerService,
-  ) {}
+  ) { }
 
   @Get('by-sensor/:id')
   // @UseGuards(JwtAuthGuard, OrgContextGuard, PermissionGuard)
@@ -132,21 +133,21 @@ export class TelemetryController {
 
     console.log('\n🚀 === OPTIMIZED TELEMETRY QUERY START ===');
     console.log('📝 Full Request Body:', JSON.stringify(body, null, 2));
-    console.log('🎯 Parsed Request:', { 
-      sensorIds: `[${sensorIds.join(', ')}] (${sensorIds.length} sensors)`, 
+    console.log('🎯 Parsed Request:', {
+      sensorIds: `[${sensorIds.join(', ')}] (${sensorIds.length} sensors)`,
       timeRange: `${timeRange.start} -> ${timeRange.end}`,
-      timeSpanDays: Math.round((new Date(timeRange.end).getTime() - new Date(timeRange.start).getTime()) / (24*60*60*1000)),
-      targetPoints, 
-      deviceType, 
+      timeSpanDays: Math.round((new Date(timeRange.end).getTime() - new Date(timeRange.start).getTime()) / (24 * 60 * 60 * 1000)),
+      targetPoints,
+      deviceType,
       liveMode,
       isComparison: sensorIds.length > 1
     });
 
 
     // Live mode override - limit to max 100 points regardless of request
-    const effectiveTargetPoints = liveMode?.enabled ? 
-      Math.min(liveMode.maxReadings || 100, 100) : targetPoints;
-    
+    const effectiveTargetPoints = liveMode?.enabled ?
+      liveMode.maxReadings || 100 : targetPoints;
+
 
     // Handle live mode with simple sliding window
     if (liveMode?.enabled) {
@@ -163,7 +164,7 @@ export class TelemetryController {
     });
 
     if (!optimizedData || !optimizedData.length) {
-      return { 
+      return {
         data: sensorIds.map(id => ({
           sensorId: id,
           mac: '',
@@ -190,9 +191,9 @@ export class TelemetryController {
     const originalCountPromises = sensorIds.map(async (id) => {
       const count = await this.svc.countDocuments({
         sensorId: id,
-        ts: { 
-          $gte: new Date(timeRange.start), 
-          $lte: new Date(timeRange.end) 
+        ts: {
+          $gte: new Date(timeRange.start),
+          $lte: new Date(timeRange.end)
         }
       });
       return { sensorId: id, count };
@@ -204,7 +205,7 @@ export class TelemetryController {
     const data: OptimizedSensorData[] = sensorIds.map((id) => {
       const rows = optimizedData.filter((r) => r.sensorId === id);
       const originalCount = countMap[id] || 0;
-      
+
       if (!rows.length) {
         return {
           sensorId: id,
@@ -256,35 +257,35 @@ export class TelemetryController {
     });
 
     const processingTime = Date.now() - startTime;
-    
+
     console.log('\n📊 === FINAL RESULTS SUMMARY ===');
-    
+
     // Check if this is truly comparative data (same number of points for each sensor)
     const isComparativeData = data.length > 1 && new Set(data.map(s => s.data.length)).size === 1;
-    
+
     if (isComparativeData) {
       console.log('🎯 === COMPARATIVE DATA DETECTED ===');
       console.log(`✅ All ${data.length} sensors have exactly ${data[0].data.length} synchronized data points`);
       console.log(`🕐 This indicates true comparative analysis data with aligned timestamps`);
-      
+
       // Show comparison table for first few points
       if (data[0].data.length > 0) {
         console.log(`\n📊 === COMPARISON VALIDATION TABLE ===`);
         const comparisonTable: any[] = [];
         const sampleCount = Math.min(3, data[0].data.length);
-        
+
         for (let i = 0; i < sampleCount; i++) {
           const rowData: any = {
             timestamp: data[0].data[i].timestamp
           };
-          
+
           data.forEach((sensor, sensorIndex) => {
             rowData[`Sensor_${sensorIndex + 1}_${sensor.sensorId.substring(0, 8)}`] = sensor.data[i].value;
           });
-          
+
           comparisonTable.push(rowData);
         }
-        
+
         console.table(comparisonTable);
         console.log(`✅ Above table confirms synchronized readings - this is true comparative data!`);
       }
@@ -293,21 +294,21 @@ export class TelemetryController {
       console.log(`❌ Sensors have different point counts: ${data.map(s => s.data.length).join(', ')}`);
       console.log(`🔄 This suggests individual sensor optimization instead of comparative sampling`);
     }
-    
+
     data.forEach((sensor, index) => {
       console.log(`📈 Sensor ${index + 1}: ${sensor.sensorId}`);
       console.log(`   🏷️  MAC: ${sensor.mac}, Type: ${sensor.type}, Unit: ${sensor.unit}`);
       console.log(`   📊 Data points: ${sensor.data.length}`);
       console.log(`   📈 Values: min=${sensor.min}, max=${sensor.max}, avg=${sensor.avg}`);
       console.log(`   🔧 Optimization: ${sensor.optimization.strategy} (${sensor.optimization.originalCount} -> ${sensor.optimization.optimizedCount})`);
-      
+
       if (sensor.data.length > 0) {
-        console.log(`   ⏰ Time range: ${sensor.data[0].timestamp} -> ${sensor.data[sensor.data.length-1].timestamp}`);
+        console.log(`   ⏰ Time range: ${sensor.data[0].timestamp} -> ${sensor.data[sensor.data.length - 1].timestamp}`);
         console.log(`   📝 Sample values: [${sensor.data.slice(0, 3).map(d => d.value).join(', ')}${sensor.data.length > 3 ? '...' : ''}]`);
       }
     });
     console.log(`⏱️  Total processing time: ${processingTime}ms`);
-    console.log('🏁 === OPTIMIZED TELEMETRY QUERY END ===\n');
+    console.log('🏁 === OPTIMIZEwD TELEMETRY QUERY END ===\n');
 
     return { data };
   }
@@ -316,49 +317,49 @@ export class TelemetryController {
    * 🔍 Detect which optimization strategy was used based on data patterns
    */
   private detectOptimizationStrategy(
-    rows: any[], 
-    sensorCount: number, 
+    rows: any[],
+    sensorCount: number,
     targetPoints: number
   ): OptimizationInfo['strategy'] {
     if (!rows.length) return 'database-optimized';
-    
+
     // Check for intersection-based sampling (comparison mode with exact timestamps)
     if (sensorCount > 1) {
       // Check if data points have synchronized timestamps (intersection-based)
       const timestamps = rows.map(r => new Date(r.ts).getTime());
       const timeSet = new Set(timestamps);
-      
+
       // If we have fewer unique timestamps than total points, it suggests intersection-based sampling
       const uniqueTimestampRatio = timeSet.size / timestamps.length;
-      
+
       if (uniqueTimestampRatio < 0.8) { // Less than 80% unique timestamps suggests intersection
         console.log(`🎯 Detected intersection-based sampling (${timeSet.size} unique timestamps from ${timestamps.length} points)`);
         return 'intersection-based-sampling';
       }
-      
+
       // Check for time alignment (time-bucket sampling)
       if (timestamps.length > 1) {
         const intervals: number[] = [];
-        
+
         for (let i = 1; i < Math.min(5, timestamps.length); i++) {
-          intervals.push(timestamps[i] - timestamps[i-1]);
+          intervals.push(timestamps[i] - timestamps[i - 1]);
         }
-        
+
         // If intervals are consistent (within 10% variance), it's time-aligned
         if (intervals.length > 1) {
           const avgInterval = intervals.reduce((a, b) => a + b, 0) / intervals.length;
-          const variance = intervals.every(interval => 
+          const variance = intervals.every(interval =>
             Math.abs(interval - avgInterval) / avgInterval < 0.1
           );
-          
+
           if (variance) {
-            console.log(`🎯 Detected time-aligned sampling (consistent ${Math.floor(avgInterval/60000)}min intervals)`);
+            console.log(`🎯 Detected time-aligned sampling (consistent ${Math.floor(avgInterval / 60000)}min intervals)`);
             return 'time-aligned-sampling';
           }
         }
       }
     }
-    
+
     // Default to database-optimized for other cases
     return 'database-optimized';
   }
@@ -416,7 +417,7 @@ export class TelemetryController {
     const data: TableSensorData[] = sensorIds.map(id => ({
       sensorId: id,
       mac: meta[id]?.mac ?? '',
-      type: meta[id]?.type ?? 'unknown', 
+      type: meta[id]?.type ?? 'unknown',
       unit: meta[id]?.unit ?? '',
       data: sensorDataMap.get(id) || []
     }));
@@ -444,26 +445,31 @@ export class TelemetryController {
    * Handle live mode with simple database-level sliding window
    */
   private async handleLiveMode(
-    sensorIds: string[], 
-    timeRange: { start: string; end: string }, 
+    sensorIds: string[],
+    timeRange: { start: string; end: string },
     maxPoints: number
   ) {
     const query = {
       sensorId: { $in: sensorIds },
-      ts: { 
-        $gte: new Date(timeRange.start), 
-        $lte: new Date(timeRange.end) 
+      ts: {
+        $gte: new Date(timeRange.start),
+        $lte: new Date(timeRange.end)
       }
     };
 
     // Get the most recent points directly from database
+    // Sort by ts DESC + _id DESC for deterministic, consistent results
+    // (prevents inconsistent results when multiple docs have same timestamp)
     const recentData = await this.svc.findWithPagination(
       query,
       { _id: 0, sensorId: 1, ts: 1, value: 1 },
-      { ts: -1 }, // Sort by timestamp descending (most recent first)
+      { ts: -1, _id: -1 }, // Secondary sort by _id for consistent ordering
       0,
       maxPoints
     );
+
+    console.log(`📊 LIVE MODE DEBUG: Requested ${maxPoints} records, got ${recentData.length} records`);
+    console.log(`📊 Query: sensorIds=${sensorIds.join(',')}, start=${timeRange.start}, end=${timeRange.end}`);
 
     // Reverse to get chronological order
     const chronologicalData = recentData.reverse();
@@ -475,9 +481,9 @@ export class TelemetryController {
     const originalCountPromises = sensorIds.map(async (id) => {
       const count = await this.svc.countDocuments({
         sensorId: id,
-        ts: { 
-          $gte: new Date(timeRange.start), 
-          $lte: new Date(timeRange.end) 
+        ts: {
+          $gte: new Date(timeRange.start),
+          $lte: new Date(timeRange.end)
         }
       });
       return { sensorId: id, count };
@@ -489,7 +495,7 @@ export class TelemetryController {
     const data: OptimizedSensorData[] = sensorIds.map((id) => {
       const rows = chronologicalData.filter((r) => r.sensorId === id);
       const originalCount = countMap[id] || 0;
-      
+
       if (!rows.length) {
         return {
           sensorId: id,
@@ -547,11 +553,11 @@ export class TelemetryController {
   @Post('export/estimate')
   async estimateExport(@Body() query: any) {
     const startTime = Date.now();
-    
+
     // Use consistent defaults with stream endpoint
     const format = query.format || 'csv';
     const includeMetadata = query.includeMetadata !== false;
-    
+
     console.log('🔍 === EXPORT ESTIMATION START ===');
     console.log(`📊 Sensors: ${query.sensorIds?.length} [${query.sensorIds?.join(', ')}]`);
     console.log(`📅 Time Range: ${query.timeRange?.start} -> ${query.timeRange?.end}`);
@@ -569,7 +575,7 @@ export class TelemetryController {
     });
 
     const processingTime = Date.now() - startTime;
-    
+
     console.log(`📊 Export Estimation Results:`);
     console.log(`   📈 Total Records: ${estimate.totalRecords.toLocaleString()}`);
     console.log(`   ⏱️ Estimated Duration: ${estimate.estimatedDuration}`);
@@ -595,15 +601,29 @@ export class TelemetryController {
     @Res() res: Response
   ) {
     const startTime = Date.now();
-    
+
     // Set defaults
     const format = query.format || ExportFormat.CSV;
     const maxRecords = query.maxRecords || 500000;
     const includeMetadata = query.includeMetadata !== false;
-    
+    const timezone = query.timezone || null; // IANA timezone string (e.g., 'Asia/Kolkata')
+
+    // Helper function to convert timestamp to user's timezone
+    // Format: YYYY-MM-DD HH:MM:SS (Excel/Google Sheets friendly)
+    const formatTimestamp = (isoTimestamp: string): string => {
+      if (!timezone) return isoTimestamp; // Return ISO format if no timezone specified
+      try {
+        const dt = DateTime.fromISO(isoTimestamp, { zone: 'utc' });
+        return dt.setZone(timezone).toFormat('yyyy-MM-dd HH:mm:ss');
+      } catch (e) {
+        return isoTimestamp; // Fallback to original if conversion fails
+      }
+    };
+
     console.log('\n📥 === STREAMING EXPORT START ===');
-    console.log(`� Include Metadata: ${includeMetadata} (from query: ${query.includeMetadata})`);
-    console.log(`�📋 Sensors: ${query.sensorIds?.length} [${query.sensorIds?.join(', ')}]`);
+    console.log(`🌍 Timezone: ${timezone || 'UTC (default)'}`);
+    console.log(`🔧 Include Metadata: ${includeMetadata} (from query: ${query.includeMetadata})`);
+    console.log(`📋 Sensors: ${query.sensorIds?.length} [${query.sensorIds?.join(', ')}]`);
     console.log(`🔍 Debug query object:`, JSON.stringify(query, null, 2));
 
     try {
@@ -626,7 +646,7 @@ export class TelemetryController {
       // Adaptive batch size based on dataset size (after estimate is available)
       const adaptiveBatchSize = estimate.totalRecords > 100000 ? 20000 : 10000;
       const batchSize = query.batchSize || adaptiveBatchSize;
-      
+
       console.log(`📊 Format: ${format}, Batch Size: ${batchSize.toLocaleString()}, Max: ${maxRecords.toLocaleString()}`);
       console.log(`🎯 Adaptive Batch: ${estimate.totalRecords.toLocaleString()} records → ${batchSize.toLocaleString()} batch size`);
 
@@ -640,20 +660,21 @@ export class TelemetryController {
       }
 
       // Setup streaming response headers
-      const filename = query.filename || 
+      const filename = query.filename ||
         `telemetry-export-${Date.now()}.${format}`;
-      
+
       const contentType = format === ExportFormat.CSV ? 'text/csv' : 'application/json';
-      
+
       res.setHeader('Content-Type', contentType);
       res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
       res.setHeader('Cache-Control', 'no-cache');
 
-      // 📏 CONDITIONAL CONTENT-LENGTH: Only for small datasets to avoid calculation overhead
-      if (estimate.totalRecords <= 1000) {
+      // 📏 CONDITIONAL CONTENT-LENGTH: Only for small datasets WITHOUT timezone conversion
+      // When timezone is specified, the timestamp format changes and content length will be different
+      if (estimate.totalRecords <= 1000 && !timezone) {
         try {
           console.log('📏 Calculating exact content size for small dataset...');
-          
+
           const contentLength = await this.svc.calculateExportSize({
             sensorIds: query.sensorIds,
             timeRange: {
@@ -672,6 +693,9 @@ export class TelemetryController {
           console.log(`⚠️ Size calculation failed for small dataset: ${error.message}`);
           // Fallback to chunked transfer if calculation fails
         }
+      } else if (timezone) {
+        console.log(`📏 Timezone specified (${timezone}) - using chunked transfer (timestamp format changes size)`);
+        // Skip Content-Length when timezone conversion is applied
       } else {
         console.log(`📏 Large dataset (${estimate.totalRecords.toLocaleString()} records) - using chunked transfer encoding for optimal performance`);
         // For large datasets, skip Content-Length to avoid calculation overhead
@@ -686,7 +710,7 @@ export class TelemetryController {
 
       // CSV Header or JSON array start
       if (format === ExportFormat.CSV) {
-        const csvHeader = includeMetadata 
+        const csvHeader = includeMetadata
           ? 'sensorId,timestamp,value,metadata\n'
           : 'sensorId,timestamp,value\n';
         res.write(csvHeader);
@@ -730,34 +754,35 @@ export class TelemetryController {
         // Format and write chunk
         for (let i = 0; i < chunk.data.length; i++) {
           const row = chunk.data[i];
-          
+          const formattedTs = formatTimestamp(row.timestamp);
+
           if (format === ExportFormat.CSV) {
-            const metaStr = includeMetadata && metadata[row.sensorId] 
+            const metaStr = includeMetadata && metadata[row.sensorId]
               ? JSON.stringify(metadata[row.sensorId]).replace(/"/g, '""')
               : '';
             const csvRow = includeMetadata
-              ? `"${row.sensorId}","${row.timestamp}",${row.value},"${metaStr}"\n`
-              : `"${row.sensorId}","${row.timestamp}",${row.value}\n`;
+              ? `"${row.sensorId}","${formattedTs}",${row.value},"${metaStr}"\n`
+              : `"${row.sensorId}","${formattedTs}",${row.value}\n`;
             res.write(csvRow);
           } else if (format === ExportFormat.JSON) {
-            const jsonRow = includeMetadata 
-              ? { ...row, metadata: metadata[row.sensorId] }
-              : row;
+            const jsonRow = includeMetadata
+              ? { ...row, timestamp: formattedTs, metadata: metadata[row.sensorId] }
+              : { ...row, timestamp: formattedTs };
             // Fix: Only add comma if this is not the first record overall
             const isFirstRecord = processedRecords - chunk.count + i === 0;
             const prefix = isFirstRecord ? '' : ',';
             res.write(prefix + JSON.stringify(jsonRow));
           } else if (format === ExportFormat.JSONL) {
-            const jsonRow = includeMetadata 
-              ? { ...row, metadata: metadata[row.sensorId] }
-              : row;
+            const jsonRow = includeMetadata
+              ? { ...row, timestamp: formattedTs, metadata: metadata[row.sensorId] }
+              : { ...row, timestamp: formattedTs };
             res.write(JSON.stringify(jsonRow) + '\n');
           }
         }
 
         lastId = chunk.lastId || undefined;
         console.log(`🔄 Updated lastId: ${lastId?.substring(0, 8)}..., hasMore: ${chunk.hasMore}`);
-        
+
         if (!chunk.hasMore) {
           console.log(`🏁 Breaking loop - no more data (chunk.hasMore = false)`);
           break;
@@ -776,14 +801,14 @@ export class TelemetryController {
 
       const totalTime = Date.now() - startTime;
       const actualRecordsPerSec = Math.round(processedRecords / (totalTime / 1000));
-      
+
       console.log(`✅ Streaming export completed:`);
       console.log(`   📊 Records exported: ${processedRecords.toLocaleString()}`);
       console.log(`   📦 Chunks processed: ${chunkCount}`);
       console.log(`   ⏱️ Total time: ${totalTime}ms (${Math.round(totalTime / 1000)}s)`);
       console.log(`   🚀 Actual speed: ${actualRecordsPerSec} records/sec`);
       console.log(`   📈 Estimated vs Actual: ${estimate.estimatedDuration} vs ${Math.round(totalTime / 1000)}s`);
-      
+
       // Performance feedback for future estimates
       if (actualRecordsPerSec < 1500) {
         console.log(`   ⚠️ Performance below expected - consider optimizing queries`);
@@ -795,7 +820,7 @@ export class TelemetryController {
 
     } catch (error) {
       console.error(`❌ Streaming export failed:`, error);
-      
+
       if (!res.headersSent) {
         res.status(500).json({
           success: false,
