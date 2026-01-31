@@ -24,6 +24,7 @@ import { IotModule } from './module/iot/iot.module';
 import { RealtimeModule } from './module/realtime/realtime.module';
 import { SettingsModule } from './module/settings/settings.module';
 import { AlertsModule } from './module/alerts/alerts.module';
+import { DeveloperModule } from './module/developer/developer.module';
 
 @Module({
   imports: [
@@ -47,18 +48,19 @@ import { AlertsModule } from './module/alerts/alerts.module';
     RealtimeModule,
     SettingsModule,
     AlertsModule,
+    DeveloperModule,
   ],
   controllers: [AppController],
   providers: [
     AppService,
     {
-      provide : APP_GUARD,
+      provide: APP_GUARD,
       useClass: JwtAuthGuard,
     },
     {
-      provide : APP_GUARD,
+      provide: APP_GUARD,
       useClass: RolesGuard,
     },
   ],
 })
-export class AppModule {}
+export class AppModule { }

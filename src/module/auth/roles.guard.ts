@@ -10,9 +10,14 @@ import { OrgContextUser } from '../../auth/org-context.guard';
 
 @Injectable()
 export class RolesGuard implements CanActivate {
-  constructor(private reflector: Reflector) {}
+  constructor(private reflector: Reflector) { }
 
   async canActivate(ctx: ExecutionContext): Promise<boolean> {
+    // Skip for @Public() routes (e.g., Developer API uses API key auth, not JWT)
+    const isPublic = this.reflector.get<boolean>('isPublic', ctx.getHandler()) ||
+      this.reflector.get<boolean>('isPublic', ctx.getClass());
+    if (isPublic) return true;
+
     const requiredRoles =
       this.reflector.get<UserRole[]>('roles', ctx.getHandler()) ?? [];
 
@@ -20,7 +25,7 @@ export class RolesGuard implements CanActivate {
 
     const request = ctx.switchToHttp().getRequest();
     const user = request.user as OrgContextUser;
-    
+
     if (!user?.role) {
       throw new ForbiddenException('No organization context or role found');
     }

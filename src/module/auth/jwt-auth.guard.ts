@@ -9,11 +9,12 @@ export class JwtAuthGuard extends AuthGuard('jwt') {
     super();
   }
 
-  // Make guard skip routes marked @Public()
+  // Make guard skip routes marked @Public() at handler or class level
   override canActivate(
     ctx: ExecutionContext,
   ): boolean | Promise<boolean> | Observable<boolean> {
-    const isPublic = this.reflector.get<boolean>('isPublic', ctx.getHandler());
+    const isPublic = this.reflector.get<boolean>('isPublic', ctx.getHandler()) ||
+      this.reflector.get<boolean>('isPublic', ctx.getClass());
     if (isPublic) return true;
     return super.canActivate(ctx);
   }
