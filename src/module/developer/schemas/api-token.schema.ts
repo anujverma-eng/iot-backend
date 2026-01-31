@@ -9,8 +9,8 @@ export type ApiTokenDocument = ApiToken & Document;
 
 @Schema({ collection: 'api_tokens', timestamps: true })
 export class ApiToken {
-  /** Organization this token belongs to (unique - one token per org) */
-  @Prop({ type: Types.ObjectId, ref: 'Organization', required: true, unique: true, index: true })
+  /** Organization this token belongs to */
+  @Prop({ type: Types.ObjectId, ref: 'Organization', required: true, index: true })
   orgId: Types.ObjectId;
 
   /** User who created/regenerated this token */
@@ -80,5 +80,8 @@ export class ApiToken {
 
 export const ApiTokenSchema = SchemaFactory.createForClass(ApiToken);
 
-// Ensure only one active token per organization
-ApiTokenSchema.index({ orgId: 1 }, { unique: true });
+// Compound index: only one ACTIVE token per org (revoked tokens can exist)
+ApiTokenSchema.index(
+  { orgId: 1, isRevoked: 1 },
+  { unique: true, partialFilterExpression: { isRevoked: false } }
+);

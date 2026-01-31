@@ -48,27 +48,70 @@ export class ApiTokenService {
   /**
    * Generate a new API token for an organization
    * Only one token allowed per organization
+   * If a revoked/expired token exists from the same day, carry over rate limit counters
+   * 
+   * Edge cases handled:
+   * 1. User revokes and regenerates same day → carry over day count
+   * 2. Token expires same day user regenerates → carry over day count if used today
+   * 3. Token expires, user regenerates next day → fresh limits (new day)
+   * 4. First time generation → fresh limits
    */
   async generateToken(
     orgId: Types.ObjectId,
     userId: Types.ObjectId,
     name?: string,
   ): Promise<GeneratedTokenResponse> {
-    // Check if org already has an active token
+    const now = new Date();
+    const startOfDay = new Date(now);
+    startOfDay.setHours(0, 0, 0, 0);
+
+    // Check if org already has an active (non-revoked) token
     const existingToken = await this.apiTokenModel.findOne({
       orgId,
       isRevoked: false,
     });
 
     if (existingToken) {
-      // Check if it's expired
-      if (existingToken.expiresAt > new Date()) {
+      // Check if it's NOT expired (still active)
+      if (existingToken.expiresAt > now) {
         throw new ConflictException(
           'Organization already has an active API token. Please revoke the existing token before generating a new one.',
         );
       }
-      // If expired, we'll replace it below
-      await this.apiTokenModel.deleteOne({ _id: existingToken._id });
+      // Token is expired - mark as revoked to preserve history
+      await this.apiTokenModel.updateOne(
+        { _id: existingToken._id },
+        { $set: { isRevoked: true } },
+      );
+    }
+
+    // Find any revoked token for this org to potentially carry over rate limits
+    // We need to check if it was used TODAY (based on lastDayReset)
+    const revokedToken = await this.apiTokenModel.findOne({
+      orgId,
+      isRevoked: true,
+    }).sort({ updatedAt: -1 }); // Get most recently revoked token
+
+    // Determine rate limits to carry over
+    // Only carry over if the revoked token's lastDayReset is TODAY
+    let currentDayCount = 0;
+    let lastDayReset = startOfDay;
+    let totalSuccessfulCalls = 0;
+
+    if (revokedToken) {
+      // Check if the revoked token was used today (lastDayReset >= startOfDay)
+      const tokenLastDayReset = revokedToken.lastDayReset;
+      const wasUsedToday = tokenLastDayReset && tokenLastDayReset >= startOfDay;
+
+      if (wasUsedToday) {
+        // Carry over today's usage
+        currentDayCount = revokedToken.currentDayCount || 0;
+        lastDayReset = tokenLastDayReset;
+        this.logger.log(`Carrying over rate limits from revoked token: ${currentDayCount} calls used today`);
+      }
+
+      // Always carry over lifetime total (for analytics)
+      totalSuccessfulCalls = revokedToken.totalSuccessfulCalls || 0;
     }
 
     // Generate random token (32 bytes = 64 hex chars)
@@ -80,35 +123,32 @@ export class ApiTokenService {
     const tokenHash = await bcrypt.hash(rawToken, saltRounds);
 
     // Calculate expiry date
-    const expiresAt = new Date();
+    const expiresAt = new Date(now);
     expiresAt.setDate(expiresAt.getDate() + TOKEN_EXPIRY_DAYS);
 
     const tokenName = name || 'Default API Key';
 
-    // Create or replace token (upsert by orgId)
-    await this.apiTokenModel.findOneAndUpdate(
-      { orgId },
-      {
-        $set: {
-          orgId,
-          createdByUserId: userId,
-          name: tokenName,
-          tokenHash,
-          tokenPrefix,
-          expiresAt,
-          isRevoked: false,
-          lastUsedAt: null,
-          currentMinuteCount: 0,
-          currentDayCount: 0,
-          lastMinuteReset: new Date(),
-          lastDayReset: new Date(),
-          totalSuccessfulCalls: 0,
-        },
-      },
-      { upsert: true, new: true },
-    );
+    // Delete old revoked tokens for this org (cleanup)
+    await this.apiTokenModel.deleteMany({ orgId, isRevoked: true });
 
-    this.logger.log(`Generated new API token for org ${orgId}`);
+    // Create new token with carried-over counters
+    await this.apiTokenModel.create({
+      orgId,
+      createdByUserId: userId,
+      name: tokenName,
+      tokenHash,
+      tokenPrefix,
+      expiresAt,
+      isRevoked: false,
+      lastUsedAt: null,
+      currentMinuteCount: 0, // Minute counter always resets with new token
+      currentDayCount, // Carry over from revoked token if same day
+      lastMinuteReset: now,
+      lastDayReset, // Carry over from revoked token if same day
+      totalSuccessfulCalls, // Carry over lifetime count for analytics
+    });
+
+    this.logger.log(`Generated new API token for org ${orgId} (day count: ${currentDayCount}, lifetime: ${totalSuccessfulCalls})`);
 
     // Return raw token ONLY ONCE - it won't be recoverable after this
     return {
@@ -344,14 +384,15 @@ export class ApiTokenService {
 
   /**
    * Revoke an organization's token
+   * Marks as revoked instead of deleting to preserve rate limit counters
    */
   async revokeToken(orgId: Types.ObjectId): Promise<void> {
-    const result = await this.apiTokenModel.deleteOne({
-      orgId,
-      isRevoked: false,
-    });
+    const result = await this.apiTokenModel.updateOne(
+      { orgId, isRevoked: false },
+      { $set: { isRevoked: true } },
+    );
 
-    if (result.deletedCount === 0) {
+    if (result.matchedCount === 0) {
       throw new BadRequestException('No active token found for this organization');
     }
 
